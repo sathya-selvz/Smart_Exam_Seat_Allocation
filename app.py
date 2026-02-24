@@ -2,27 +2,28 @@ from flask import Flask, flash, render_template, request, redirect, url_for, jso
 from datetime import datetime
 from static.converter import excel_to_json
 import os
+import time
 import math
 import json
 from werkzeug.utils import secure_filename
+from openpyxl import load_workbook
 from dotenv import load_dotenv
 from pymongo import MongoClient
+from flask_bcrypt import Bcrypt
+
+# Load environment variables from .env file
+load_dotenv()
 
 # configuring flask
 
 app = Flask(__name__)
 app.debug = True
-app.secret_key = b'_5#y2L"F4Q8z\n\xec]/'
-app.config['UPLOAD_FOLDER'] = r'C:\Users\hp\Desktop\Exam-Seat-Arrangement\uploads'
-
-# Load environment variables from .env file
-load_dotenv()
+app.secret_key = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
+bcrypt = Bcrypt(app)
+app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(__file__), 'uploads')
 
 # Get the MongoDB connection string from the environment variable
-# to set environment variable setx MONGO_PASSWORD your_pass
-MONGO_PASSWORD =os.getenv("MONGO_PASSWORD")
-MONGO_URI = f"mongodb+srv://afreenpoly:{MONGO_PASSWORD}@studetails.ebwix9o.mongodb.net/"
-
+MONGO_URI = os.getenv("MONGO_URI")
 
 # Connect to MongoDB
 client = MongoClient(MONGO_URI)
@@ -34,9 +35,96 @@ db = client.Studetails
 usercollections = db.users
 stucollections = db.student
 
+# Create default admin user if it doesn't exist
+def create_default_admin():
+    try:
+        if not usercollections.find_one({'username': 'admin'}):
+            hashed_password = bcrypt.generate_password_hash('admin').decode('utf-8')
+            usercollections.insert_one({'username': 'admin', 'password': hashed_password})
+            print("✅ Default admin account created (username: admin, password: admin)")
+        else:
+            print("✅ Admin account already exists")
+    except Exception as e:
+        print(f"⚠️ Could not create default admin: {e}")
+
+# Initialize default admin
+create_default_admin()
+
+# Helper function to generate formatted roll numbers
+def generate_formatted_rollnum(year, sheet_name, serial_number):
+    """
+    Generate readable roll numbers based on year and department
+    Examples:
+    - 2nd year CE: 24CE001
+    - 3rd year CSA: 23MCA013
+    - 4th year EE: 22EE014
+    """
+    # Determine admission year prefix
+    year_prefix = {
+        "SecondYear": "24",    # Admitted in 2024
+        "ThirdYear": "23",     # Admitted in 2023
+        "FourthYear": "22"     # Admitted in 2022
+    }
+    
+    # Department code mapping (uppercase)
+    dept_mapping = {
+        "csa": "MCA",
+        "csb": "MCA",
+        "ec": "EC",
+        "ee": "MEE",
+        "ce": "CE",
+        "me": "ME",
+        "mea": "ME",
+        "meb": "ME",
+        "ad": "AD",
+        "mr": "MR",
+        "rb": "RB"
+    }
+    
+    year_code = year_prefix.get(year, "24")
+    dept_code = dept_mapping.get(sheet_name.lower(), sheet_name.upper())
+    
+    # Format: YYDEPT### (e.g., 24CE001, 23MCA013) - all uppercase
+    formatted_roll = f"{year_code}{dept_code}{serial_number:03d}"
+    
+    return formatted_roll
+
+def detect_year_from_filename(filename):
+    name = (filename or "").lower()
+    if "second" in name or "2nd" in name or "year2" in name:
+        return "SecondYear"
+    if "third" in name or "3rd" in name or "year3" in name:
+        return "ThirdYear"
+    if "fourth" in name or "4th" in name or "year4" in name:
+        return "FourthYear"
+    return None
+
+def normalize_student_excel(file_path, year_label):
+    workbook = load_workbook(file_path)
+    try:
+        for sheet_name in workbook.sheetnames:
+            sheet = workbook[sheet_name]
+            roll_col = None
+            for idx, cell in enumerate(sheet[1], start=1):
+                value = str(cell.value).strip().lower() if cell.value is not None else ""
+                if value in ("rollnum", "roll number", "rollno", "roll no"):
+                    roll_col = idx
+                    break
+            if roll_col is None:
+                continue
+
+            for row_idx in range(2, sheet.max_row + 1):
+                serial_number = row_idx - 1
+                formatted_roll = generate_formatted_rollnum(year_label, sheet_name, serial_number)
+                sheet.cell(row=row_idx, column=roll_col).value = formatted_roll
+        workbook.save(file_path)
+    finally:
+        workbook.close()
+
 # global variables
 listy = []
 filled = False
+seating_data = {}  # Store seating results for immediate display
 with open('static/dates.txt', 'r') as datefiles:
     dates = json.load(datefiles)
 
@@ -59,9 +147,11 @@ def register():
             return redirect(url_for('register'))
         
         else:
+            # Hash the password before storing
+            hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
             # If the username is unique, insert the new user into the database
             usercollections.insert_one(
-                {'username': username, 'password': password})
+                {'username': username, 'password': hashed_password})
             flash('Registration successful!', 'registration-success')
             return redirect(url_for('login'))
     else:
@@ -76,12 +166,11 @@ def login():
         username = request.form['username']
         password = request.form['password']
         
-        # Check if the username and password match a user in the database
-        user = usercollections.find_one(
-            {'username': username, 'password': password})
+        # Check if the username exists in the database
+        user = usercollections.find_one({'username': username})
         
-        if user:
-            # If the user exists, store the username in the session
+        if user and bcrypt.check_password_hash(user['password'], password):
+            # If the user exists and password matches, store the username in the session
             session['username'] = username
             return redirect(url_for('admin'))
         else:
@@ -102,12 +191,20 @@ def admin():
 @app.route('/student', methods=['GET', 'POST'])
 def student():
     if request.method == 'POST':
-        roll = request.form['roll_num']
-        student_data = stucollections.find_one({'rollnum': int(roll)})
+        roll = request.form['roll_num'].strip()
+        
+        # Try to find student by formatted rollnum (string) or original rollnum (int)
+        student_data = stucollections.find_one({'rollnum': roll})
+        if not student_data:
+            # Try as integer if it's numeric
+            try:
+                student_data = stucollections.find_one({'rollnum': int(roll)})
+            except (ValueError, TypeError):
+                pass
         
         # Retrieve the seat number for the student
-        seatnum = None
-        if student_data is not None:
+        seatnum = []
+        if student_data is not None and 'seatnum' in student_data and student_data['seatnum'] is not None:
             seatnum = student_data['seatnum']
         return render_template('studentpage.html', roll_num=roll, seat_num=seatnum)
     else:
@@ -133,36 +230,60 @@ def uploadpage():
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    file2 = request.files['file2']
-    file3 = request.files['file3']
-    file4 = request.files['file4']
+    files = request.files.getlist('files')
 
-    if file2.filename == '' and file3.filename == '' and file4.filename == '':
+    if not files:
         flash('No files uploaded', 'error')
         return render_template('studentdataupload.html')
 
-    if file2.filename:
+    if len(files) != 3:
+        flash('Please select exactly 3 files (Second, Third, Fourth Year).', 'error')
+        return render_template('studentdataupload.html')
+
+    year_files = {"SecondYear": None, "ThirdYear": None, "FourthYear": None}
+    unassigned = []
+    for file in files:
+        year_label = detect_year_from_filename(file.filename)
+        if year_label and year_files[year_label] is None:
+            year_files[year_label] = file
+        else:
+            unassigned.append(file)
+    for year_label in ("SecondYear", "ThirdYear", "FourthYear"):
+        if year_files[year_label] is None and unassigned:
+            year_files[year_label] = unassigned.pop(0)
+    if any(year_files[label] is None for label in year_files):
+        flash('Could not determine all years from filenames. Please include Second/Third/Fourth in names.', 'error')
+        return render_template('studentdataupload.html')
+
+    file2 = year_files["SecondYear"]
+    file3 = year_files["ThirdYear"]
+    file4 = year_files["FourthYear"]
+
+    if file2 and file2.filename:
         filename2 = secure_filename(file2.filename)
         file2.save(os.path.join(app.config['UPLOAD_FOLDER'], filename2))
         global data2
+        normalize_student_excel(os.path.join(app.config['UPLOAD_FOLDER'], filename2), "SecondYear")
         data2 = excel_to_json(os.path.join(
             app.config['UPLOAD_FOLDER'], filename2))
     else:
         data2 = None
 
-    if file3.filename:
+    if file3 and file3.filename:
         filename3 = secure_filename(file3.filename)
         file3.save(os.path.join(app.config['UPLOAD_FOLDER'], filename3))
         global data3
+        normalize_student_excel(os.path.join(app.config['UPLOAD_FOLDER'], filename3), "ThirdYear")
         data3 = excel_to_json(os.path.join(
             app.config['UPLOAD_FOLDER'], filename3))
     else:
         data3 = None
 
-    if file4.filename:
+    if file4 and file4.filename:
         filename4 = secure_filename(file4.filename)
         file4.save(os.path.join(app.config['UPLOAD_FOLDER'], filename4))
         global data4
+        normalize_student_excel(os.path.join(app.config['UPLOAD_FOLDER'], filename4), "FourthYear")
         data4 = excel_to_json(os.path.join(
             app.config['UPLOAD_FOLDER'], filename4))
     else:
@@ -170,21 +291,51 @@ def upload_file():
 
     if data2 is not None:
         for sheet_name, sheet_data in data2.items():
-            stucollections.insert_many([
-                {**item, "sheet_name": sheet_name, "Year": "SecondYear", "classroom": None} for item in sheet_data
-            ])
+            # Generate formatted roll numbers for each student
+            formatted_data = []
+            for idx, item in enumerate(sheet_data, start=1):
+                formatted_roll = generate_formatted_rollnum("SecondYear", sheet_name, idx)
+                formatted_data.append({
+                    **item, 
+                    "original_rollnum": item.get("rollnum"),  # Keep original if exists
+                    "rollnum": formatted_roll,  # Use formatted roll number
+                    "sheet_name": sheet_name, 
+                    "Year": "SecondYear", 
+                    "classroom": None
+                })
+            stucollections.insert_many(formatted_data)
 
     if data3 is not None:
         for sheet_name, sheet_data in data3.items():
-            stucollections.insert_many([
-                {**item, "sheet_name": sheet_name, "Year": "ThirdYear", "classroom": None} for item in sheet_data
-            ])
+            # Generate formatted roll numbers for each student
+            formatted_data = []
+            for idx, item in enumerate(sheet_data, start=1):
+                formatted_roll = generate_formatted_rollnum("ThirdYear", sheet_name, idx)
+                formatted_data.append({
+                    **item, 
+                    "original_rollnum": item.get("rollnum"),  # Keep original if exists
+                    "rollnum": formatted_roll,  # Use formatted roll number
+                    "sheet_name": sheet_name, 
+                    "Year": "ThirdYear", 
+                    "classroom": None
+                })
+            stucollections.insert_many(formatted_data)
 
     if data4 is not None:
         for sheet_name, sheet_data in data4.items():
-            stucollections.insert_many([
-                {**item, "sheet_name": sheet_name, "Year": "FourthYear", "classroom": None} for item in sheet_data
-            ])
+            # Generate formatted roll numbers for each student
+            formatted_data = []
+            for idx, item in enumerate(sheet_data, start=1):
+                formatted_roll = generate_formatted_rollnum("FourthYear", sheet_name, idx)
+                formatted_data.append({
+                    **item, 
+                    "original_rollnum": item.get("rollnum"),  # Keep original if exists
+                    "rollnum": formatted_roll,  # Use formatted roll number
+                    "sheet_name": sheet_name, 
+                    "Year": "FourthYear", 
+                    "classroom": None
+                })
+            stucollections.insert_many(formatted_data)
 
     global listy
     listy = []
@@ -207,16 +358,37 @@ def display_data():
 def timetable():
     if request.method == 'POST':
         # Retrieve uploaded files
-        file2 = request.files['file2']
-        file3 = request.files['file3']
-        file4 = request.files['file4']
+        files = request.files.getlist('files')
 
-        if not file2 and not file3 and not file4:
+        if not files:
             flash('No files uploaded', 'error')
             return render_template('timetableupload.html')
 
+        if len(files) != 3:
+            flash('Please select exactly 3 files (Second, Third, Fourth Year).', 'error')
+            return render_template('timetableupload.html')
+
+        year_files = {"SecondYear": None, "ThirdYear": None, "FourthYear": None}
+        unassigned = []
+        for file in files:
+            year_label = detect_year_from_filename(file.filename)
+            if year_label and year_files[year_label] is None:
+                year_files[year_label] = file
+            else:
+                unassigned.append(file)
+        for year_label in ("SecondYear", "ThirdYear", "FourthYear"):
+            if year_files[year_label] is None and unassigned:
+                year_files[year_label] = unassigned.pop(0)
+        if any(year_files[label] is None for label in year_files):
+            flash('Could not determine all years from filenames. Please include Second/Third/Fourth in names.', 'error')
+            return render_template('timetableupload.html')
+
+        file2 = year_files["SecondYear"]
+        file3 = year_files["ThirdYear"]
+        file4 = year_files["FourthYear"]
+
         # Check if file2 is uploaded
-        if file2.filename:
+        if file2 and file2.filename:
             filename2 = secure_filename(file2.filename)
             file2.save(os.path.join(app.config['UPLOAD_FOLDER'], filename2))
             global timetable2
@@ -226,7 +398,7 @@ def timetable():
             timetable2 = None
 
         # Check if file3 is uploaded
-        if file3.filename:
+        if file3 and file3.filename:
             filename3 = secure_filename(file3.filename)
             file3.save(os.path.join(app.config['UPLOAD_FOLDER'], filename3))
             global timetable3
@@ -236,7 +408,7 @@ def timetable():
             timetable3 = None
 
         # Check if file4 is uploaded
-        if file4.filename:
+        if file4 and file4.filename:
             filename4 = secure_filename(file4.filename)
             file4.save(os.path.join(app.config['UPLOAD_FOLDER'], filename4))
             global timetable4
@@ -260,6 +432,24 @@ def timetable():
         fourth_year_student_ids = [student["_id"]
                                    for student in fourth_year_students]
 
+        def get_subject_date(subject):
+            date_value = subject.get("date")
+            if date_value is not None:
+                return date_value
+            for key, value in subject.items():
+                if isinstance(key, str) and key.strip().lower() == "date":
+                    return value
+            return None
+
+        def get_subject_name(subject):
+            subject_value = subject.get("subject")
+            if subject_value is not None:
+                return subject_value
+            for key, value in subject.items():
+                if isinstance(key, str) and key.strip().lower() == "subject":
+                    return value
+            return None
+
         # The code first checks if the timetable exists by checking if "timetable2" is not None.
         # If it does exist, the code iterates over the sheets in the timetable ("timetable2.items()"),
         # and for each subject in each sheet, it converts the "date" field to a string in the format '%d-%m-%Y'
@@ -278,187 +468,122 @@ def timetable():
         if timetable2 is not None:
             for sheet_name, subjects in timetable2.items():
                 for subject in subjects:
-                    subject_date = datetime.fromtimestamp(
-                        subject['date'] / 1000.0).strftime('%d-%m-%Y')
+                    date_value = get_subject_date(subject)
+                    if date_value is None:
+                        continue
+                    subject_name = get_subject_name(subject) or "Unknown"
+                    # Handle date from openpyxl (returns datetime object)
+                    if isinstance(date_value, datetime):
+                        subject_date = date_value.strftime('%d-%m-%Y')
+                    else:
+                        # Fallback for other formats
+                        subject_date = str(date_value)
                     subject['date'] = subject_date
+                    subject['subject'] = subject_name
                     if subject_date not in dates:
                         dates.append(subject_date)
-            stucollections.update_many(
-                {"sheet_name": "csa", "Year": "SecondYear",
-                    "_id": {"$in": second_year_student_ids}},
-                {"$set": {"subject": timetable2["cs"]}}
-            )
-            stucollections.update_many(
-                {"sheet_name": "csb", "Year": "SecondYear",
-                    "_id": {"$in": second_year_student_ids}},
-                {"$set": {"subject": timetable2["cs"]}}
-            )
-            stucollections.update_many(
-                {"sheet_name": "ec", "Year": "SecondYear",
-                    "_id": {"$in": second_year_student_ids}},
-                {"$set": {"subject": timetable2["ec"]}}
-            )
-            stucollections.update_many(
-                {"sheet_name": "ee", "Year": "SecondYear",
-                    "_id": {"$in": second_year_student_ids}},
-                {"$set": {"subject": timetable2["ee"]}}
-            )
-            stucollections.update_many(
-                {"sheet_name": "ad", "Year": "SecondYear",
-                    "_id": {"$in": second_year_student_ids}},
-                {"$set": {"subject": timetable2["ad"]}}
-            )
-            stucollections.update_many(
-                {"sheet_name": "ce", "Year": "SecondYear",
-                    "_id": {"$in": second_year_student_ids}},
-                {"$set": {"subject": timetable2["ce"]}}
-            )
-            # stucollections.update_many(
-            #     {"sheet_name": "mea", "Year": "SecondYear",
-            #         "_id": {"$in": second_year_student_ids}},
-            #     {"$set": {"subject": timetable2["me"]}}
-            # )
-            # stucollections.update_many(
-            #     {"sheet_name": "meb", "Year": "SecondYear",
-            #         "_id": {"$in": second_year_student_ids}},
-            #     {"$set": {"subject": timetable2["me"]}}
-            # )
-            stucollections.update_many(
-                {"sheet_name": "me", "Year": "SecondYear",
-                    "_id": {"$in": second_year_student_ids}},
-                {"$set": {"subject": timetable2["me"]}}
-            )
-            stucollections.update_many(
-                {"sheet_name": "mr", "Year": "SecondYear",
-                    "_id": {"$in": second_year_student_ids}},
-                {"$set": {"subject": timetable2["mr"]}}
-            )
-            stucollections.update_many(
-                {"sheet_name": "rb", "Year": "SecondYear",
-                    "_id": {"$in": second_year_student_ids}},
-                {"$set": {"subject": timetable2["rb"]}}
-            )
+            
+            # Department to timetable sheet mapping (handles section divisions)
+            dept_timetable_mapping = {
+                "csa": "cs", "csb": "cs",
+                "ec": "ec", "ee": "ee", "ad": "ad", "ce": "ce",
+                "me": "me", "mea": "me", "meb": "me",
+                "mr": "mr", "rb": "rb",
+                "mca": "mca"
+            }
+
+            # Update subjects for second year students using actual sheet names
+            second_year_sheets = stucollections.distinct("sheet_name", {"Year": "SecondYear"})
+            for dept_sheet in second_year_sheets:
+                timetable_sheet = dept_timetable_mapping.get(dept_sheet, dept_sheet)
+                if timetable_sheet in timetable2:
+                    result = stucollections.update_many(
+                        {"sheet_name": dept_sheet, "Year": "SecondYear",
+                            "_id": {"$in": second_year_student_ids}},
+                        {"$set": {"subject": timetable2[timetable_sheet]}}
+                    )
+                    print(f"Updated {result.modified_count} {dept_sheet} second year students with {timetable_sheet} subjects")
 
         if timetable3 is not None:
             for sheet_name, subjects in timetable3.items():
                 for subject in subjects:
-                    subject_date = datetime.fromtimestamp(
-                        subject['date'] / 1000.0).strftime('%d-%m-%Y')
+                    date_value = get_subject_date(subject)
+                    if date_value is None:
+                        continue
+                    subject_name = get_subject_name(subject) or "Unknown"
+                    # Handle date from openpyxl (returns datetime object)
+                    if isinstance(date_value, datetime):
+                        subject_date = date_value.strftime('%d-%m-%Y')
+                    else:
+                        # Fallback for other formats
+                        subject_date = str(date_value)
                     subject['date'] = subject_date
+                    subject['subject'] = subject_name
                     if subject_date not in dates:
                         dates.append(subject_date)
-            stucollections.update_many(
-                {"sheet_name": "csa", "Year": "ThirdYear",
-                    "_id": {"$in": third_year_student_ids}},
-                {"$set": {"subject": timetable3["cs"]}}
-            )
-            stucollections.update_many(
-                {"sheet_name": "csb", "Year": "ThirdYear",
-                    "_id": {"$in": third_year_student_ids}},
-                {"$set": {"subject": timetable3["cs"]}}
-            )
-            stucollections.update_many(
-                {"sheet_name": "ee", "Year": "ThirdYear",
-                    "_id": {"$in": third_year_student_ids}},
-                {"$set": {"subject": timetable3["ee"]}}
-            )
-            stucollections.update_many(
-                {"sheet_name": "ec", "Year": "ThirdYear",
-                    "_id": {"$in": third_year_student_ids}},
-                {"$set": {"subject": timetable3["ec"]}}
-            )
-            stucollections.update_many(
-                {"sheet_name": "ce", "Year": "ThirdYear",
-                    "_id": {"$in": third_year_student_ids}},
-                {"$set": {"subject": timetable3["ce"]}}
-            )
-            stucollections.update_many(
-                {"sheet_name": "mea", "Year": "ThirdYear",
-                    "_id": {"$in": third_year_student_ids}},
-                {"$set": {"subject": timetable3["me"]}}
-            )
-            stucollections.update_many(
-                {"sheet_name": "meb", "Year": "ThirdYear",
-                    "_id": {"$in": third_year_student_ids}},
-                {"$set": {"subject": timetable3["me"]}}
-            )
-            stucollections.update_many(
-                {"sheet_name": "me", "Year": "ThirdYear",
-                    "_id": {"$in": third_year_student_ids}},
-                {"$set": {"subject": timetable3["me"]}}
-            )
-            stucollections.update_many(
-                {"sheet_name": "mr", "Year": "ThirdYear",
-                    "_id": {"$in": third_year_student_ids}},
-                {"$set": {"subject": timetable3["mr"]}}
-            )
-            stucollections.update_many(
-                {"sheet_name": "ad", "Year": "ThirdYear",
-                    "_id": {"$in": third_year_student_ids}},
-                {"$set": {"subject": timetable3["ad"]}}
-            )
-            stucollections.update_many(
-                {"sheet_name": "rb", "Year": "ThirdYear",
-                    "_id": {"$in": third_year_student_ids}},
-                {"$set": {"subject": timetable3["rb"]}}
-            )
+            
+            # Department to timetable sheet mapping
+            dept_timetable_mapping = {
+                "csa": "cs", "csb": "cs",
+                "ec": "ec", "ee": "ee", "ce": "ce",
+                "mea": "me", "meb": "me", "me": "me",
+                "mr": "mr", "ad": "ad", "rb": "rb",
+                "mca": "mca"
+            }
+
+            # Update subjects for third year students using actual sheet names
+            third_year_sheets = stucollections.distinct("sheet_name", {"Year": "ThirdYear"})
+            for dept_sheet in third_year_sheets:
+                timetable_sheet = dept_timetable_mapping.get(dept_sheet, dept_sheet)
+                if timetable_sheet in timetable3:
+                    result = stucollections.update_many(
+                        {"sheet_name": dept_sheet, "Year": "ThirdYear",
+                            "_id": {"$in": third_year_student_ids}},
+                        {"$set": {"subject": timetable3[timetable_sheet]}}
+                    )
+                    print(f"Updated {result.modified_count} {dept_sheet} third year students with {timetable_sheet} subjects")
 
         if timetable4 is not None:
             for sheet_name, subjects in timetable4.items():
                 for subject in subjects:
-                    subject_date = datetime.fromtimestamp(
-                        subject['date'] / 1000.0).strftime('%d-%m-%Y')
+                    date_value = get_subject_date(subject)
+                    if date_value is None:
+                        continue
+                    subject_name = get_subject_name(subject) or "Unknown"
+                    # Handle date from openpyxl (returns datetime object)
+                    if isinstance(date_value, datetime):
+                        subject_date = date_value.strftime('%d-%m-%Y')
+                    else:
+                        # Fallback for other formats
+                        subject_date = str(date_value)
                     subject['date'] = subject_date
+                    subject['subject'] = subject_name
                     if subject_date not in dates:
                         dates.append(subject_date)
-            stucollections.update_many(
-                {"sheet_name": "csa", "Year": "FourthYear",
-                    "_id": {"$in": fourth_year_student_ids}},
-                {"$set": {"subject": timetable4["cs"]}}
-            )
-            stucollections.update_many(
-                {"sheet_name": "csb", "Year": "FourthYear",
-                    "_id": {"$in": fourth_year_student_ids}},
-                {"$set": {"subject": timetable4["cs"]}}
-            )
-            stucollections.update_many(
-                {"sheet_name": "ec", "Year": "FourthYear",
-                    "_id": {"$in": fourth_year_student_ids}},
-                {"$set": {"subject": timetable4["ec"]}}
-            )
-            stucollections.update_many(
-                {"sheet_name": "ce", "Year": "FourthYear",
-                    "_id": {"$in": fourth_year_student_ids}},
-                {"$set": {"subject": timetable4["ce"]}}
-            )
-            stucollections.update_many(
-                {"sheet_name": "ee", "Year": "FourthYear",
-                    "_id": {"$in": fourth_year_student_ids}},
-                {"$set": {"subject": timetable4["ee"]}}
-            )
-            stucollections.update_many(
-                {"sheet_name": "me", "Year": "FourthYear",
-                    "_id": {"$in": fourth_year_student_ids}},
-                {"$set": {"subject": timetable4["me"]}}
-            )
-            stucollections.update_many(
-                {"sheet_name": "mea", "Year": "FourthYear",
-                    "_id": {"$in": fourth_year_student_ids}},
-                {"$set": {"subject": timetable4["me"]}}
-            )
-            stucollections.update_many(
-                {"sheet_name": "meb", "Year": "FourthYear",
-                    "_id": {"$in": fourth_year_student_ids}},
-                {"$set": {"subject": timetable4["me"]}}
-            )
-            stucollections.update_many(
-                {"sheet_name": "mr", "Year": "FourthYear",
-                    "_id": {"$in": fourth_year_student_ids}},
-                {"$set": {"subject": timetable4["mr"]}}
-            )
+            
+            # Department to timetable sheet mapping
+            dept_timetable_mapping = {
+                "csa": "cs", "csb": "cs",
+                "ec": "ec", "ce": "ce", "ee": "ee",
+                "me": "me", "mea": "me", "meb": "me",
+                "mr": "mr",
+                "mca": "mca"
+            }
+
+            # Update subjects for fourth year students using actual sheet names
+            fourth_year_sheets = stucollections.distinct("sheet_name", {"Year": "FourthYear"})
+            for dept_sheet in fourth_year_sheets:
+                timetable_sheet = dept_timetable_mapping.get(dept_sheet, dept_sheet)
+                if timetable_sheet in timetable4:
+                    result = stucollections.update_many(
+                        {"sheet_name": dept_sheet, "Year": "FourthYear",
+                            "_id": {"$in": fourth_year_student_ids}},
+                        {"$set": {"subject": timetable4[timetable_sheet]}}
+                    )
+                    print(f"Updated {result.modified_count} {dept_sheet} fourth year students with {timetable_sheet} subjects")
 
         with open('static/dates.txt', 'w') as f:
-            json.dump(dates, f, indent=4)
+            json.dump(dates, f)
             flash('Upload successful', 'success')
         return render_template('timetableupload.html')
     else:
@@ -468,16 +593,20 @@ def timetable():
 # the timetable is fetched and displayed here
 @app.route('/viewtimetable', methods=['GET'])
 def view_timetable():
-    # Fetch the documents from the MongoDB collection
+    # Fetch the documents from the MongoDB collection (only those with subject field)
     documents = stucollections.find(
-        {}, {'sheet_name': 1, 'subject': 1, 'Year': 1})
+        {'subject': {'$exists': True}}, {'sheet_name': 1, 'subject': 1, 'Year': 1})
     
     # Dictionary to store the timetable data
     timetables = {}
     for doc in documents:
-        year = doc['Year']
-        sheet_name = doc['sheet_name']
-        subject = doc['subject']
+        year = doc.get('Year')
+        sheet_name = doc.get('sheet_name')
+        subject = doc.get('subject')
+        
+        # Skip documents missing required fields
+        if not year or not sheet_name or not subject:
+            continue
 
         if year not in timetables:
             timetables[year] = {}
@@ -504,13 +633,20 @@ def view_data():
     data = []
     
     for doc in documents:
-        # Extract the relevant fields from each document and append them to the data list
-        data.append({
-            'name': doc['name'],
-            'rollnum': doc['rollnum'],
-            'sheet_name': doc['sheet_name'],
-            'Year': doc['Year']
-        })
+        # Extract the relevant fields from each document, skip if missing required fields
+        name = doc.get('name')
+        rollnum = doc.get('rollnum')
+        sheet_name = doc.get('sheet_name')
+        year = doc.get('Year')
+        
+        # Only add documents that have all required fields
+        if name and rollnum and sheet_name and year:
+            data.append({
+                'name': name,
+                'rollnum': rollnum,
+                'sheet_name': sheet_name,
+                'Year': year
+            })
         
     # Convert the data list to JSON format
     data = jsonify(data)
@@ -528,50 +664,50 @@ def details():
         class_data = []
 
         # Dictionary mapping class items to their details
+        # Standardized: 4 columns × 6 rows = 24 seats per classroom
         class_details = {
-            'ADM 303': {'class_name': 'ADM 303', 'column': 6, 'rows': 7},
-            'ADM 304': {'class_name': 'ADM 304', 'column': 8, 'rows': 3},
-            'ADM 305': {'class_name': 'ADM 305', 'column': 7, 'rows': 3},
-            'ADM 306': {'class_name': 'ADM 306', 'column': 7, 'rows': 3},
-            'ADM 307': {'class_name': 'ADM 307', 'column': 7, 'rows': 3},
-            'ADM 308': {'class_name': 'ADM 308', 'column': 7, 'rows': 3},
-            'ADM 309': {'class_name': 'ADM 309', 'column': 7, 'rows': 3},
-            'ADM 310': {'class_name': 'ADM 310', 'column': 7, 'rows': 3},
-            'ADM 311': {'class_name': 'ADM 311', 'column': 7, 'rows': 3},
-            'EAB 206': {'class_name': 'EAB 206', 'column': 7, 'rows': 3},
-            'EAB 306': {'class_name': 'EAB 306', 'column': 7, 'rows': 3},
-            'EAB 401': {'class_name': 'EAB 401', 'column': 8, 'rows': 3},
-            'EAB 304': {'class_name': 'EAB 304', 'column': 7, 'rows': 3},
-            'EAB 303': {'class_name': 'EAB 303', 'column': 7, 'rows': 3},
-            'EAB 104': {'class_name': 'EAB 104', 'column': 7, 'rows': 3},
-            'EAB 103': {'class_name': 'EAB 103', 'column': 7, 'rows': 3},
-            'EAB 203': {'class_name': 'EAB 203', 'column': 7, 'rows': 3},
-            'EAB 204': {'class_name': 'EAB 204', 'column': 7, 'rows': 3},
-            'WAB 206': {'class_name': 'WAB 206', 'column': 7, 'rows': 3},
-            'WAB 105': {'class_name': 'WAB 105', 'column': 7, 'rows': 3},
-            'WAB 107': {'class_name': 'WAB 107', 'column': 7, 'rows': 3},
-            'WAB 207': {'class_name': 'WAB 207', 'column': 8, 'rows': 3},
-            'WAB 212': {'class_name': 'WAB 212', 'column': 7, 'rows': 3},
-            'WAB 210': {'class_name': 'WAB 210', 'column': 7, 'rows': 3},
-            'WAB 211': {'class_name': 'WAB 211', 'column': 7, 'rows': 3},
-            'WAB 205': {'class_name': 'WAB 205', 'column': 7, 'rows': 3},
-            'WAB 305': {'class_name': 'WAB 305', 'column': 7, 'rows': 3},
-            'WAB 303': {'class_name': 'WAB 303', 'column': 7, 'rows': 3},
-            'WAB 403': {'class_name': 'WAB 403', 'column': 7, 'rows': 3},
-            'WAB 405': {'class_name': 'WAB 405', 'column': 7, 'rows': 3},
-            'EAB 415': {'class_name': 'EAB 415', 'column': 8, 'rows': 15},
-            'EAB 416': {'class_name': 'EAB 416', 'column': 8, 'rows': 14},
-            'WAB 412': {'class_name': 'WAB 412', 'column': 7, 'rows': 3},
-            'EAB 310': {'class_name': 'EAB 310', 'column': 7, 'rows': 3},
+            'ADM 303': {'class_name': 'ADM 303', 'column': 4, 'rows': 6},
+            'ADM 304': {'class_name': 'ADM 304', 'column': 4, 'rows': 6},
+            'ADM 305': {'class_name': 'ADM 305', 'column': 4, 'rows': 6},
+            'ADM 306': {'class_name': 'ADM 306', 'column': 4, 'rows': 6},
+            'ADM 307': {'class_name': 'ADM 307', 'column': 4, 'rows': 6},
+            'ADM 308': {'class_name': 'ADM 308', 'column': 4, 'rows': 6},
+            'ADM 309': {'class_name': 'ADM 309', 'column': 4, 'rows': 6},
+            'ADM 310': {'class_name': 'ADM 310', 'column': 4, 'rows': 6},
+            'ADM 311': {'class_name': 'ADM 311', 'column': 4, 'rows': 6},
+            'EAB 206': {'class_name': 'EAB 206', 'column': 4, 'rows': 6},
+            'EAB 306': {'class_name': 'EAB 306', 'column': 4, 'rows': 6},
+            'EAB 401': {'class_name': 'EAB 401', 'column': 4, 'rows': 6},
+            'EAB 304': {'class_name': 'EAB 304', 'column': 4, 'rows': 6},
+            'EAB 303': {'class_name': 'EAB 303', 'column': 4, 'rows': 6},
+            'EAB 104': {'class_name': 'EAB 104', 'column': 4, 'rows': 6},
+            'EAB 103': {'class_name': 'EAB 103', 'column': 4, 'rows': 6},
+            'EAB 203': {'class_name': 'EAB 203', 'column': 4, 'rows': 6},
+            'EAB 204': {'class_name': 'EAB 204', 'column': 4, 'rows': 6},
+            'WAB 206': {'class_name': 'WAB 206', 'column': 4, 'rows': 6},
+            'WAB 105': {'class_name': 'WAB 105', 'column': 4, 'rows': 6},
+            'WAB 107': {'class_name': 'WAB 107', 'column': 4, 'rows': 6},
+            'WAB 207': {'class_name': 'WAB 207', 'column': 4, 'rows': 6},
+            'WAB 212': {'class_name': 'WAB 212', 'column': 4, 'rows': 6},
+            'WAB 210': {'class_name': 'WAB 210', 'column': 4, 'rows': 6},
+            'WAB 211': {'class_name': 'WAB 211', 'column': 4, 'rows': 6},
+            'WAB 205': {'class_name': 'WAB 205', 'column': 4, 'rows': 6},
+            'WAB 305': {'class_name': 'WAB 305', 'column': 4, 'rows': 6},
+            'WAB 303': {'class_name': 'WAB 303', 'column': 4, 'rows': 6},
+            'WAB 403': {'class_name': 'WAB 403', 'column': 4, 'rows': 6},
+            'WAB 405': {'class_name': 'WAB 405', 'column': 4, 'rows': 6},
+            'EAB 415': {'class_name': 'EAB 415', 'column': 4, 'rows': 6},
+            'EAB 416': {'class_name': 'EAB 416', 'column': 4, 'rows': 6},
+            'WAB 412': {'class_name': 'WAB 412', 'column': 4, 'rows': 6},
+            'EAB 310': {'class_name': 'EAB 310', 'column': 4, 'rows': 6},
         }
 
         for item in items:
             if item in class_details:
                 class_data.append(class_details[item])
-
-        # Write the class_data list to 'static/stuarrange.txt' file as JSON
+        # Write the class_data list to 'static/stuarrange.txt' file as JSON (compact format)
         with open('static/stuarrange.txt', 'w') as f:
-            json.dump(class_data, f, indent=4)
+            json.dump(class_data, f)
 
         global filled
         filled = False
@@ -600,142 +736,245 @@ def seating():
         return redirect(url_for('admin'))
     
     else:
+        # Check if students have subjects assigned (timetable uploaded)
+        student_with_subject = stucollections.find_one({"subject": {"$exists": True, "$ne": None}})
+        if not student_with_subject:
+            flash('Please upload timetable first before generating seating!', 'error')
+            return redirect(url_for('admin'))
+
+        # Always reload dates to reflect latest timetable upload
+        with open('static/dates.txt', 'r') as datefiles:
+            dates = json.load(datefiles)
+        
         #reset data to avoid redundancy
         stucollections.update_many({}, {"$unset": {"seatnum": ""}})
         
         for date in dates:
-            global listyy
-            
-            #all date , subjects and students
-            listyy = []
-            
-            #rollnumbers of each subject
-            details = stucollections.aggregate(
-                [{"$group": {"_id": "$subject", "ro": {"$push": "$rollnum"}}}])
-            for i in details:
-                listyy.append(i)
-            
-            #sorting rollnumber by date of exam.
-            #current date subjects and students
-            listy = []
-            for item in listyy:
-                for item1 in item["_id"]:
-                    if item1.get("date") == date:
-                        tempdict = dict(item)
-                        tempdict["_id"] = item1
-                        listy.append(tempdict)
-                        
+            # Build subject groups for this date directly from students
+            subject_groups = {}
+            students_with_exams = stucollections.find(
+                {"subject": {"$elemMatch": {"date": date}}},
+                {"rollnum": 1, "subject": 1}
+            )
+            for student in students_with_exams:
+                rollnum = student.get("rollnum")
+                for subj in student.get("subject", []):
+                    if subj.get("date") == date:
+                        key = subj.get("subject", "Unknown")
+                        if key not in subject_groups:
+                            subject_groups[key] = {"_id": subj, "ro": []}
+                        subject_groups[key]["ro"].append(rollnum)
+
+            listy = list(subject_groups.values())
+
             with open('static/stuarrange.txt', 'r') as stufiles:
                 stulist = json.load(stufiles)
-             
+            
+            # Extract year and department from roll numbers
+            def normalize_dept(dept):
+                """Convert 2-char departments to 3-char"""
+                dept_mapping = {
+                    "EE": "MEE",    # Electrical/Mechanical Engineering
+                    "EC": "ECE",    # Electronics & Communication Engineering
+                    "CE": "CIV",    # Civil Engineering
+                    "ME": "MEC",    # Mechanical Engineering
+                    "RB": "RBE",    # Robotics & Automation
+                    "AD": "ADE",    # Additional
+                    "MR": "MRS",    # Miscellaneous
+                }
+                return dept_mapping.get(dept, dept)  # Return mapped or original if not found
+            
+            def extract_year_dept(rollnum):
+                """Extract year and department from roll number
+                Format: YYDEPT### where dept can be 2-3 letters (EE, ME, MEE, RB, MCA, etc)
+                """
+                if len(rollnum) < 4:
+                    return None, None
                 
+                year = rollnum[:2]  # First 2 digits (22, 23, 24)
+                
+                # Extract department (2-3 letters, stop at first digit)
+                dept = ""
+                for char in rollnum[2:]:
+                    if char.isalpha():
+                        dept += char
+                    else:
+                        break
+                
+                # Normalize 2-char departments to 3-char
+                dept = normalize_dept(dept)
+                
+                return year, dept if dept else None
+            
+            # Build year -> department -> exam -> unique rollnums for this date
+            year_dept_exam_map = {}
+            seen_rollnums = set()
+            for subject_item in listy:
+                if subject_item["ro"] and len(subject_item["ro"]) > 0:
+                    exam_name = subject_item.get("_id", {}).get("subject", "Unknown")
+                    for rollnum in subject_item.get("ro", []):
+                        if rollnum in seen_rollnums:
+                            continue
+                        seen_rollnums.add(rollnum)
+                        year, dept = extract_year_dept(rollnum)
+                        if not year or not dept:
+                            continue
+                        if year not in year_dept_exam_map:
+                            year_dept_exam_map[year] = {}
+                        if dept not in year_dept_exam_map[year]:
+                            year_dept_exam_map[year][dept] = {}
+                        if exam_name not in year_dept_exam_map[year][dept]:
+                            year_dept_exam_map[year][dept][exam_name] = []
+                        year_dept_exam_map[year][dept][exam_name].append(rollnum)
+
+            # Sort roll numbers for stable ordering
+            for year in year_dept_exam_map:
+                for dept, exam_map in year_dept_exam_map[year].items():
+                    for exam_name, rollnums in exam_map.items():
+                        rollnums.sort()
+
+            # Order years in descending order (24, 23, 22, etc.) for consistent placement
+            year_order = sorted(year_dept_exam_map.keys(), reverse=True)
+            
+            # Debug: Print department distribution
+            print("\n=== Department Distribution ===")
+            for year in year_order:
+                for dept in sorted(year_dept_exam_map[year].keys()):
+                    total_students = sum(len(rollnums) for rollnums in year_dept_exam_map[year][dept].values())
+                    print(f"Year {year}, Dept {dept}: {total_students} students")
+            print("================================\n")
+
+            # Build queues per year and department (optimized)
+            from collections import deque
+            year_dept_queues = {}
+            for year in year_order:
+                year_dept_queues[year] = {}
+                dept_order = sorted(year_dept_exam_map[year].keys())
+                for dept in dept_order:
+                    exam_map = year_dept_exam_map[year][dept]
+                    exam_names = sorted(exam_map.keys())
+                    
+                    # Convert to deques for O(1) popleft
+                    exam_deques = {exam: deque(rollnums) for exam, rollnums in exam_map.items()}
+                    
+                    # Round-robin through exams efficiently
+                    queue = []
+                    while exam_deques:
+                        for exam in list(exam_deques.keys()):
+                            if exam_deques[exam]:
+                                queue.append((exam_deques[exam].popleft(), exam))
+                                if not exam_deques[exam]:
+                                    del exam_deques[exam]
+                    
+                    year_dept_queues[year][dept] = queue
+            
+            # Batch seat assignments for performance
+            seat_assignments = []
+
+            # Build student list with round-robin across departments
+            all_students = []
+            
+            for year in year_order:
+                dept_order = sorted(year_dept_queues[year].keys())
+                
+                # Convert to deques for efficient popping
+                dept_deques = {dept: deque(year_dept_queues[year][dept]) for dept in dept_order}
+                
+                # Round-robin through departments to distribute students evenly
+                while dept_deques:
+                    for dept in dept_order:  # Keep original order for consistency
+                        if dept in dept_deques and dept_deques[dept]:
+                            rollnum, exam_name = dept_deques[dept].popleft()
+                            all_students.append((rollnum, exam_name, dept, year))
+                            if not dept_deques[dept]:
+                                del dept_deques[dept]
+            
+            student_idx = 0  # Track position in the ordered student list
+
             for i in stulist:
                 i["a"] = []
                 i["b"] = []
+                i["c"] = []
+                i["d"] = []
+                i["e"] = []
+                i["f"] = []
+                i["g"] = []
+                i["h"] = []
                 class_name = i.get("class_name")
-                if len(listy) == 0:
-                    break
-                
-                # Calculate the number of seats in 'a' ,'b'
-                a = math.ceil(int(i["column"])/2)*int(i["rows"])
-                b = (int(i["column"])*int(i["rows"]))-a
-                
-                #selecting the subject into firstitem
-                firstitem = listy[0]
-                
-                #inserts current date subject
-                idlist = []
-                idlist.append(firstitem["_id"])
-                
-                listy.pop(0)
-                
-                # Assign students to seats in category 'a'
-                for j in range(0, a):
-                    #checking if currentsubject students is over and seats and students of other subject exist
-                    if len(firstitem["ro"]) == 0:
-                        
-                        #check if students list is empty
-                        if len(listy) == 0:
+
+                rows = int(i["rows"])
+                column_order = ["a", "b", "c", "d", "e", "f", "g", "h"]  # 8 columns
+
+                # Fill ROW BY ROW (not column by column) to ensure different depts in each row
+                for row_num in range(1, rows + 1):
+                    for col_key in column_order:
+                        if student_idx >= len(all_students):
                             break
                         
-                        #takes next subject into firstitem
-                        firstitem = listy[0]
+                        rollnum, exam_name, dept, year = all_students[student_idx]
                         
-                        #contains currents date's(firstitem selected) subject
-                        idlist.append(firstitem["_id"])
-                        listy.pop(0)
+                        student_data = {
+                            "rollnum": rollnum,
+                            "dept": dept,
+                            "exam": exam_name
+                        }
+                        i[col_key].append(student_data)
+
+                        seatinfo = {
+                            "date": date,
+                            "seatnum": f"{col_key}{row_num}",
+                            "classroom": class_name,
+                            "subject": exam_name
+                        }
+                        seat_assignments.append({"rollnum": rollnum, "seatinfo": seatinfo})
                         
-                    i["a"].append(firstitem["ro"][0])
-                    #assigning seat
-                    
-                    seatinfo = [
-                        {"date": date, "seatnum": "a" + str(len(i["a"])), "classroom": class_name, "subject": firstitem["_id"]["subject"]}]
-                    stucollections.update_one({"rollnum": firstitem["ro"][0]}, {
-                        "$addToSet": {"seatnum": seatinfo}})
-                    
-                    #remove student after seating from the current subject
-                    firstitem["ro"].pop(0)
-                    
-                #a section is over while students are remaining
-                #then remaining students is appended back to the listy
-                if len(firstitem["ro"]) != 0:
-                    listy.append(firstitem)
-                
-                # check if students list is empty
-                if len(listy) == 0:
-                    break
-                
-                
-                # takes next subject into firstitem since a has been filled. And different subject should be taken
-                firstitem = listy[0]
-                listy.pop(0)
-                
-                # Assign students to seats in category 'b'
-                for k in range(0, b):
-                    if len(firstitem["ro"]) == 0:
-                        
-                        # check if students list is empty
-                        if len(listy) == 0:
-                            break
-                        
-                        # takes next subject into firstitem since there are no students left for that subject(firstitem)
-                        firstitem = listy[0]
-                        listy.pop(0)
-                    
-                    
-                    #check if a has the same subject as b
-                    if firstitem["_id"] in idlist:
-                        break
-                    #this is why some rows are left in b column
-                    
-                    i["b"].append(firstitem["ro"][0])
-                    seatinfo = [
-                        {"date": date, "seatnum": "b" + str(len(i["b"])), "classroom": class_name, "subject": firstitem["_id"]["subject"]}]
-                    stucollections.update_one({"rollnum": firstitem["ro"][0]}, {
-                        "$addToSet": {"seatnum": seatinfo}})
-                    firstitem["ro"].pop(0)
-                    
-                # b section is over while students are remaining
-                # then remaining students is appended back to the listy
-                if len(firstitem["ro"]) != 0:
-                    listy.append(firstitem)
-                    
+                        student_idx += 1
+            
+            # Batch database updates using bulk_write for performance
+            from pymongo import UpdateOne
+            student_seat_map = {}
+            for assignment in seat_assignments:
+                rollnum = assignment["rollnum"]
+                if rollnum not in student_seat_map:
+                    student_seat_map[rollnum] = []
+                student_seat_map[rollnum].append(assignment["seatinfo"])
+            
+            # Use bulk_write for efficient database updates
+            if student_seat_map:
+                bulk_operations = [
+                    UpdateOne(
+                        {"rollnum": rollnum},
+                        {"$addToSet": {"seatnum": {"$each": seats}}}
+                    )
+                    for rollnum, seats in student_seat_map.items()
+                ]
+                stucollections.bulk_write(bulk_operations, ordered=False)
+            
+            # Store seating data for immediate display
+            global seating_data
+            seating_data = {date: stulist}
+            
             newlist = list(stulist)
             
-            stunum=0
-            for listitem in listy:
-                stunum += len(listitem["ro"])
-            if stunum> 0:
-                    flash('Warning: Number of items exceeds total capacity.', 'danger')
-                    return render_template('classavailable.html',stunum=stunum)
+            # Check if all students were seated
+            # Count students from all_students queue that were not placed
+            unseated_total = len(all_students) - student_idx
             
-            # Open 'stuarrange<date>.txt' file in write mode
-            with open('static/stuarrange'+date+'.txt', 'w') as f:
-                json.dump(newlist, f, indent=4)
+            if unseated_total > 0:
+                # There are more students than available seats
+                flash(f'Warning: {unseated_total} students could not be seated. Available capacity is insufficient.', 'danger')
+                return render_template('classavailable.html', stunum=unseated_total)
+            
+            # Seating file output disabled (per request)
             filled = True  # Set 'filled' to True to indicate that seating is generated
 
 
         flash('Generated', 'success')
+        # Display seating immediately after generation with in-memory data
+        if seating_data:
+            first_date = dates[0]
+            class_list = seating_data.get(first_date, [])
+            return render_template('viewseating.html', dates=dates, date_exams={}, initial_data=class_list)
         return render_template("adminhome.html")
 
 
@@ -745,26 +984,125 @@ def viewseating():
     if not filled:
         flash('Firstly generate seating', 'error')
         return render_template("adminhome.html")
+    
+    # Load dates
     with open('static/dates.txt', 'r') as file:
-        content = file.read()
-    return render_template('viewseating.html', dates=Markup(content))
+        dates = json.load(file)
+    
+    # Get exam subjects for each date
+    date_exams = {}
+    for date in dates:
+        # Query students who have exams on this date
+        students_with_exams = stucollections.find(
+            {"subject": {"$elemMatch": {"date": date}}},
+            {"subject": 1}
+        )
+        
+        # Collect unique subjects for this date
+        subjects_set = set()
+        for student in students_with_exams:
+            if student.get('subject'):
+                for subj in student['subject']:
+                    if subj.get('date') == date:
+                        subjects_set.add(subj.get('subject', 'Unknown'))
+        
+        date_exams[date] = list(subjects_set)
+    
+    return render_template('viewseating.html', dates=dates, date_exams=date_exams)
 # Render the 'viewseating.html' template, passing the content of 'dates.txt' as the 'dates' variable
 # Markup is used to mark the content as safe to render HTML tags, assuming the content contains HTML
 
 
 @app.route('/viewseating/<path:name>', methods=['GET'])
 def viewseating1(name):
-    global filled
+    global filled, seating_data
     if filled:
-        file_loc = 'static/stuarrange'+name+'.txt'
-        # Assumes static folder is defined in your Flask app
-        with open(file_loc, 'r') as file:  # Open the file in read mode
-            content = file.read()  # Read the content of the file
+        # First try to use in-memory seating data from recent generation
+        if name in seating_data:
+            class_list = seating_data[name]
+            return json.dumps(class_list)
+        
+        # Fallback to database if data not in memory
+        def normalize_dept(dept):
+            dept_mapping = {
+                "EE": "MEE",
+                "EC": "ECE",
+                "CE": "CIV",
+                "ME": "MEC",
+                "RB": "RBE",
+                "AD": "ADE",
+                "MR": "MRS",
+            }
+            return dept_mapping.get(dept, dept)
 
+        def extract_dept(rollnum):
+            if not rollnum or len(rollnum) < 4:
+                return ""
+            dept = ""
+            for char in rollnum[2:]:
+                if char.isalpha():
+                    dept += char
+                else:
+                    break
+            return normalize_dept(dept) if dept else ""
+
+        class_map = {}
+        students_with_seats = stucollections.find(
+            {"seatnum": {"$elemMatch": {"date": name}}},
+            {"rollnum": 1, "seatnum": 1}
+        )
+
+        for student in students_with_seats:
+            rollnum = student.get("rollnum")
+            dept = extract_dept(rollnum)
+            for seatinfo in student.get("seatnum", []):
+                if seatinfo.get("date") != name:
+                    continue
+                classroom = seatinfo.get("classroom")
+                seatnum = str(seatinfo.get("seatnum", "")).lower()
+                subject = seatinfo.get("subject", "Unknown")
+                if not classroom or not seatnum or len(seatnum) < 2:
+                    continue
+
+                col_key = seatnum[0]
+                if col_key not in ("a", "b", "c", "d", "e", "f", "g", "h"):
+                    continue
+                try:
+                    seat_index = int(seatnum[1:]) - 1
+                except ValueError:
+                    continue
+
+                if classroom not in class_map:
+                    class_map[classroom] = {
+                        "class_name": classroom,
+                        "column": 8,
+                        "rows": 6,
+                        "a": [],
+                        "b": [],
+                        "c": [],
+                        "d": [],
+                        "e": [],
+                        "f": [],
+                        "g": [],
+                        "h": []
+                    }
+
+                col_list = class_map[classroom][col_key]
+                while len(col_list) <= seat_index:
+                    col_list.append(None)
+
+                col_list[seat_index] = {
+                    "rollnum": rollnum,
+                    "dept": dept,
+                    "exam": subject
+                }
+
+        class_list = sorted(class_map.values(), key=lambda c: c["class_name"])
+        return json.dumps(class_list)
     else:
         flash('Firstly generate seating', 'error')
         return render_template("adminhome.html")
-    return content
+    
 
 
 # Resetting everything out
@@ -807,12 +1145,26 @@ def reset_static():
 @app.route('/reset/uploads', methods=['GET'])
 def reset_uploads():
     folder_path = 'uploads'
-    files = os.listdir(folder_path)
-    for file in files:
-        file_path = os.path.join(folder_path, file)
-        os.remove(file_path)
-    message = "Uploads have been reset."
-    return render_template('reset.html', message=message)
+    try:
+        files = os.listdir(folder_path)
+        for file in files:
+            file_path = os.path.join(folder_path, file)
+            try:
+                # Try to remove the file
+                os.remove(file_path)
+            except PermissionError:
+                # If file is locked, wait and retry
+                time.sleep(0.1)
+                try:
+                    os.remove(file_path)
+                except Exception as e:
+                    flash(f'Could not delete {file}: {str(e)}', 'warning')
+                    continue
+        message = "Uploads have been reset."
+        return render_template('reset.html', message=message)
+    except Exception as e:
+        flash(f'Error during reset: {str(e)}', 'error')
+        return render_template('reset.html', message=f'Error: {str(e)}')
 
 
 @app.route('/reset/dates', methods=['GET'])

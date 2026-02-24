@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>Student</title>
+    <title>Student Portal - Exam Seating</title>
     <!-- Bootstrap CSS -->
     <link
       href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
@@ -10,75 +10,130 @@
       crossorigin="anonymous"
     />
     <style>
-      .my-form {
-        margin: auto 100px;
+      body {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+      }
+      .header-card {
+        background: white;
+        border-radius: 15px;
+        box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+        padding: 1.5rem;
+        margin-bottom: 2rem;
+        position: sticky;
+        top: 0;
+        z-index: 1000;
+      }
+      .search-card {
+        background: white;
+        border-radius: 15px;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        padding: 2.5rem;
+        max-width: 800px;
+        margin: 0 auto;
+      }
+      .btn-primary {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border: none;
+        padding: 12px 30px;
+        font-weight: 600;
+      }
+      .btn-primary:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+      }
+      .table {
+        background: white;
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+      }
+      .table thead {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+      }
+      .form-control {
+        padding: 12px;
+        border-radius: 8px;
+        border: 2px solid #e0e0e0;
+      }
+      .form-control:focus {
+        border-color: #667eea;
+        box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+      }
+      h5 {
+        color: #667eea;
+        font-weight: 700;
       }
     </style>
   </head>
   <body>
-    <div class="container py-3">
-      <header>
-        <div
-          class="d-flex flex-column flex-md-row align-items-center pb-3 mb-4 border-bottom"
-        >
-          <a
-            href="#"
-            class="d-flex align-items-center link-body-emphasis text-decoration-none"
-          >
-            <span class="fs-4">Student Page</span>
-          </a>
-
-          <nav class="d-inline-flex mt-2 mt-md-0 ms-md-auto">
-            <a
-              class="me-3 py-2 link-body-emphasis text-decoration-none"
-              href="/"
-              >Home</a
-            >
-          </nav>
-        </div>
-      </header>
-    </div>
-
-    <form action="/student" method="POST" class="my-form">
-      <div class="custom-div">
-        <div class="d-flex justify-content-between">
-          <label for="roll_num">Roll Number:</label>
-          <input
-            type="text"
-            class="form-control"
-            name="roll_num"
-            id="roll_num"
-            placeholder="Enter roll number"
-            size="4"
-          />
-          <button type="submit" class="btn btn-primary">Submit</button>
+    <div class="container py-4">
+      <div class="header-card">
+        <div class="d-flex justify-content-between align-items-center">
+          <h4 class="mb-0">🎓 Student Portal</h4>
+          <a href="/" class="btn btn-outline-secondary btn-sm">🏠 Home</a>
         </div>
       </div>
+
+      <div class="search-card">
+        <form action="/student" method="POST">
+          <h5 class="mb-4 text-center">Find Your Exam Seat</h5>
+          <div class="mb-3">
+            <label for="roll_num" class="form-label fw-bold">Enter Your Roll Number</label>
+            <div class="input-group input-group-lg">
+              <span class="input-group-text">🔍</span>
+              <input
+                type="text"
+                class="form-control"
+                name="roll_num"
+                id="roll_num"
+                placeholder="e.g., 24CE001, 23MCA013"
+                required
+              />
+              <button type="submit" class="btn btn-primary">Search</button>
+            </div>
+            <small class="text-muted d-block mt-2">
+              Format: Year + Department + Serial Number (e.g., 24CE001)
+            </small>
+          </div>
+        </form>
       {% if roll_num %}
-      <div class="mt-4">
-        <h5>Exam Hall Details:</h5>
-        <table class="table my-table">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Subject</th>
-              <th>Seat Number</th>
-              <th>Classroom</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for seat in seat_num %}
-            <tr>
-              <td>{{ seat[0]['date'] }}</td>
-              <td>{{ seat[0]['subject'] }}</td>
-              <td>{{ seat[0]['seatnum'] }}</td>
-              <td>{{ seat[0]['classroom'] }}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+      <div class="mt-5">
+        <h5 class="mb-3">📋 Your Exam Schedule</h5>
+        {% if seat_num and seat_num|length > 0 %}
+        <div class="table-responsive">
+          <table class="table table-hover">
+            <thead>
+              <tr>
+                <th>📅 Date</th>
+                <th>📚 Subject</th>
+                <th>💺 Seat Number</th>
+                <th>🏛️ Classroom</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for seat in seat_num %}
+              <tr>
+                <td class="fw-semibold">{{ seat['date'] }}</td>
+                <td>{{ seat['subject'] }}</td>
+                <td><span class="badge bg-primary">{{ seat['seatnum'] }}</span></td>
+                <td>{{ seat['classroom'] }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="alert alert-warning border-0 shadow-sm" role="alert">
+          <strong>⚠️ No Seat Assignment Found</strong><br>
+          No seat assignment for <strong>{{ roll_num }}</strong>. Please verify your roll number or contact admin.
+        </div>
+        {% endif %}
       </div>
       {% endif %}
-    </form>
+      </div>
+    </div>
   </body>
 </html>

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>Admin Page</title>
+    <title>Admin Portal - Login</title>
     <!-- Bootstrap CSS -->
     <link
       href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
@@ -10,101 +10,134 @@
       crossorigin="anonymous"
     />
     <style>
+      body {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+      }
+      .header-card {
+        background: white;
+        border-radius: 15px;
+        box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+        padding: 1.5rem;
+        margin-bottom: 2rem;
+        position: sticky;
+        top: 0;
+        z-index: 1000;
+      }
       .form-container {
-        height: 70vh;
+        min-height: 60vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 2rem;
       }
-      .form-signin {
-        max-width: 330px;
+      .auth-card {
+        background: white;
+        border-radius: 20px;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        padding: 2.5rem;
+        width: 100%;
+        max-width: 450px;
+      }
+      .btn-primary {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border: none;
+        padding: 12px 30px;
+        font-weight: 600;
+        width: 100%;
+      }
+      .btn-primary:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+      }
+      .form-control {
+        padding: 12px;
+        border-radius: 8px;
+        border: 2px solid #e0e0e0;
+      }
+      .form-control:focus {
+        border-color: #667eea;
+        box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+      }
+      .auth-card h2 {
+        color: #667eea;
+        font-weight: 700;
+        margin-bottom: 1.5rem;
+      }
+      .info-badge {
+        background: linear-gradient(135deg, #667eea20 0%, #764ba220 100%);
+        border-left: 4px solid #667eea;
         padding: 1rem;
-        border-radius: 10px;
-      }
-
-      .form-signin .form-floating:focus-within {
-        z-index: 2;
-      }
-
-      .form-signin input[type="email"] {
-        margin-bottom: -1px;
-        border-bottom-right-radius: 0;
-        border-bottom-left-radius: 0;
-      }
-
-      .form-signin input[type="password"] {
-        margin-bottom: 10px;
-        border-top-left-radius: 0;
-        border-top-right-radius: 0;
+        border-radius: 8px;
+        margin-bottom: 1.5rem;
       }
     </style>
   </head>
   <body>
-    <div class="container py-3">
-      <header>
-        <div
-          class="d-flex flex-column flex-md-row align-items-center pb-3 mb-4 border-bottom"
-        >
-          <a
-            href="#"
-            class="d-flex align-items-center link-body-emphasis text-decoration-none"
-          >
-            <span class="fs-4">Login Page</span>
-          </a>
-          <nav class="d-inline-flex mt-2 mt-md-0 ms-md-auto">
-            <a
-              class="me-3 py-2 link-body-emphasis text-decoration-none"
-              href="/admin"
-              >Home</a
-            >
-          </nav>
+    <div class="container py-4">
+      <div class="header-card">
+        <div class="d-flex justify-content-between align-items-center">
+          <h4 class="mb-0">🔐 Admin Portal</h4>
+          <a href="/" class="btn btn-outline-secondary btn-sm">🏠 Home</a>
         </div>
-      </header>
+      </div>
     </div>
 
-    <div
-      class="form-container d-flex justify-content-center align-items-center"
-    >
-      <div class="form-signin border border-2 border-grey m-3">
+    <div class="container form-container">
+      <div class="auth-card">
         <form method="POST" action="{{ url_for('login') }}">
-          <!-- <img class="mb-4" src="" alt="" width="72" height="57"> -->
-          <h1 class="h3 mb-3 fw-normal">Admin Login</h1>
-          <div class="form-floating">
+          <h2 class="text-center">🔑 Admin Login</h2>
+          
+          <div class="info-badge">
+            <small class="text-muted">
+              <strong>Default Credentials:</strong><br>
+              Username: <code class="text-primary">admin</code><br>
+              Password: <code class="text-primary">admin</code>
+            </small>
+          </div>
+          
+          <div class="mb-3">
+            <label for="username" class="form-label fw-semibold">Username</label>
             <input
               type="text"
               class="form-control"
               id="username"
               name="username"
-              placeholder="Username"
+              placeholder="Enter username"
+              required
             />
-            <label for="username">Username</label>
           </div>
-          <div class="form-floating">
+          <div class="mb-3">
+            <label for="password" class="form-label fw-semibold">Password</label>
             <input
               type="password"
               class="form-control"
               id="password"
               name="password"
-              placeholder="Password"
+              placeholder="Enter password"
+              required
             />
-            <label for="password">Password</label>
           </div>
-          <div class="form-check text-start my-3">
+          <div class="form-check mb-3">
             <input
               class="form-check-input"
               type="checkbox"
               value="remember-me"
               id="flexCheckDefault"
             />
-            <label class="form-check-label" for="flexCheckDefault">
+            <label class="form-check-label text-muted" for="flexCheckDefault">
               Remember me
             </label>
           </div>
-          <button class="btn btn-primary w-100 py-2" type="submit">
-            Sign in
+          <button class="btn btn-primary" type="submit">
+            Sign In →
           </button>
         </form>
         {% with messages = get_flashed_messages(category_filter=['login-error'])
         %} {% if messages %}
-        <div class="alert alert-danger mt-3">
-          <ul class="list-unstyled mb-0">
+        <div class="alert alert-danger border-0 shadow-sm mt-3">
+          <strong>⚠️ Login Failed</strong>
+          <ul class="list-unstyled mb-0 mt-2">
             {% for message in messages %}
             <li>{{ message }}</li>
             {% endfor %}
@@ -113,57 +146,60 @@
         {% endif %} {% endwith %}
       </div>
 
-      <div class="form-signin border border-2 border-grey">
+      <div class="auth-card">
         <form method="POST" action="{{ url_for('register') }}">
-          <!-- <img class="mb-4" src="" alt="" width="72" height="57"> -->
-          <h1 class="h3 mb-3 fw-normal">Admin Sign-Up</h1>
-          <div class="form-floating">
+          <h2 class="text-center">✨ Create Admin Account</h2>
+          <div class="mb-3">
+            <label for="username-field" class="form-label fw-semibold">Username</label>
             <input
               type="text"
               class="form-control"
               name="username"
               id="username-field"
-              placeholder="Username"
+              placeholder="Choose a username"
+              required
             />
-            <label for="username">Username</label>
           </div>
-          <div class="form-floating">
+          <div class="mb-3">
+            <label for="password-field" class="form-label fw-semibold">Password</label>
             <input
               type="password"
               class="form-control"
               name="password"
               id="password-field"
-              placeholder="Password"
+              placeholder="Choose a strong password"
+              required
             />
-            <label for="password">Password</label>
           </div>
-          <div class="form-check text-start my-3">
+          <div class="form-check mb-3">
             <input
               class="form-check-input"
               type="checkbox"
               value="remember-me"
-              id="flexCheckDefault"
+              id="flexCheckDefault2"
             />
-            <label class="form-check-label" for="flexCheckDefault">
-              Remember me
+            <label class="form-check-label text-muted" for="flexCheckDefault2">
+              I agree to the terms and conditions
             </label>
           </div>
-          <button class="btn btn-primary w-100 py-2 mb-2" type="submit">
-            Sign Up
+          <button class="btn btn-primary" type="submit">
+            Create Account →
           </button>
         </form>
         {% with messages =
         get_flashed_messages(category_filter=['registration-error',
         'registration-success']) %} {% if messages %} {% for message in messages
         %} {% if 'registration-success' in message %}
-        <div class="alert alert-danger">
-          <ul class="list-unstyled mb-0">
+        <div class="alert alert-success border-0 shadow-sm mt-3">
+          <strong>✅ Success!</strong>
+          <ul class="list-unstyled mb-0 mt-2">
             <li>{{ message }}</li>
           </ul>
         </div>
         {% else %}
-        <div class="alert alert-success mt-3">
-          <ul class="list-unstyled mb-0">
+        <div class="alert alert-danger border-0 shadow-sm mt-3">
+          <strong>⚠️ Registration Failed</strong>
+          <ul class="list-unstyled mb-0 mt-2">
             <li>{{ message }}</li>
           </ul>
         </div>

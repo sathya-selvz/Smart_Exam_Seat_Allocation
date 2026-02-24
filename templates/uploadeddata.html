@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Uploads</title>
+    <title>Upload Success</title>
     <!-- Bootstrap CSS -->
     <link
       href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
@@ -10,82 +10,143 @@
       integrity="sha384-9ndCyUaIbzAi2FUVXJi0CjmCapSmO7SnpJef0486qhLnuZ2cdeRhO02iuK6FUUVM"
       crossorigin="anonymous"
     />
+    <style>
+      body {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+      }
+      .header-card {
+        background: white;
+        border-radius: 15px;
+        box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+        padding: 1.5rem;
+        margin-bottom: 2rem;
+        position: sticky;
+        top: 0;
+        z-index: 1000;
+      }
+      .success-card {
+        background: white;
+        border-radius: 20px;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        padding: 3rem;
+        text-align: center;
+        margin-bottom: 2rem;
+      }
+      .year-card {
+        background: white;
+        border-radius: 15px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+        overflow: hidden;
+      }
+      .year-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 15px 40px rgba(0,0,0,0.25);
+      }
+      .card-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        font-weight: 700;
+        padding: 1.5rem;
+      }
+      .success-icon {
+        font-size: 4rem;
+        margin-bottom: 1rem;
+      }
+      h4 {
+        color: #667eea;
+        font-weight: 700;
+      }
+      .badge {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 0.5rem 1rem;
+        font-size: 0.9rem;
+      }
+    </style>
   </head>
   <body>
-    <div class="container py-3">
-      <header>
-        <div
-          class="d-flex flex-column flex-md-row align-items-center pb-3 mb-4 border-bottom"
-        >
-          <a
-            href="#"
-            class="d-flex align-items-center link-body-emphasis text-decoration-none"
-          >
-            <span class="fs-4">Successfully Uploaded</span>
-          </a>
-          <nav class="d-inline-flex mt-2 mt-md-0 ms-md-auto">
-            <a
-              class="me-3 py-2 link-body-emphasis text-decoration-none"
-              href="/admin"
-              >Home</a
-            >
-            <a
-              class="me-3 py-2 link-body-emphasis text-decoration-none"
-              href="/displaydata"
-              >View Data</a
-            >
-          </nav>
+    <div class="container py-4">
+      <div class="header-card">
+        <div class="d-flex justify-content-between align-items-center">
+          <h4 class="mb-0">✅ Upload Status</h4>
+          <div>
+            <a href="/admin" class="btn btn-outline-secondary btn-sm me-2">🏠 Admin Home</a>
+            <a href="/viewdata" class="btn btn-outline-primary btn-sm">📊 View Data</a>
+          </div>
         </div>
-      </header>
-    </div>
+      </div>
 
-    <div class="row row-cols-1 row-cols-md-4 mb-3 justify-content-center align-items-center">
-      {% if data2 is not none %}
-      <div class="col-md">
-        <div class="card mb-4 rounded-3 shadow-sm custom-card">
-          <div class="card-header py-3">
-            <h4 class="my-0 fw-normal text-center">2nd Year</h4>
-          </div>
-          <div class="card-body">
-            <ul class="list-styled mt-3 mb-4 custom-list">
-              {% for sheet_name in data2 %}
-              <li>{{ sheet_name }}</li>
-              {% endfor %}
-            </ul>
+      <div class="success-card">
+        <div class="success-icon">🎉</div>
+        <h2 class="mb-3">Successfully Uploaded!</h2>
+        <p class="text-muted">Student data has been imported and roll numbers have been generated.</p>
+      </div>
+
+      <div class="row row-cols-1 row-cols-md-3 g-4">
+        {% if data2 is not none %}
+        <div class="col">
+          <div class="year-card">
+            <div class="card-header text-center">
+              <h4 class="mb-0 text-white">📗 Second Year</h4>
+            </div>
+            <div class="card-body p-4">
+              <h5 class="mb-3 text-center">Uploaded Classes:</h5>
+              <ul class="list-group">
+                {% for sheet_name in data2 %}
+                <li class="list-group-item d-flex justify-content-between align-items-center">
+                  {{ sheet_name|upper }}
+                  <span class="badge">✓</span>
+                </li>
+                {% endfor %}
+              </ul>
+            </div>
           </div>
         </div>
-      </div>
-      {% endif %} {% if data3 is not none %}
-      <div class="col-md">
-        <div class="card mb-4 rounded-3 shadow-sm custom-card">
-          <div class="card-header py-3">
-            <h4 class="my-0 fw-normal text-center">3rd Year</h4>
-          </div>
-          <div class="card-body">
-            <ul class="list-styled mt-3 mb-4 custom-list">
-              {% for sheet_name in data3 %}
-              <li>{{ sheet_name }}</li>
-              {% endfor %}
-            </ul>
-          </div>
-        </div>
-      </div>
-      {% endif %} {% if data4 is not none %}
-      <div class="col-md">
-        <div class="card mb-4 rounded-3 shadow-sm custom-card">
-          <div class="card-header py-3">
-            <h4 class="my-0 fw-normal text-center">4th Year</h4>
-          </div>
-          <div class="card-body">
-            <ul class="list-styled mt-3 mb-4 custom-list">
-              {% for sheet_name in data4 %}
-              <li>{{ sheet_name }}</li>
-              {% endfor %}
-            </ul>
+        {% endif %}
+
+        {% if data3 is not none %}
+        <div class="col">
+          <div class="year-card">
+            <div class="card-header text-center">
+              <h4 class="mb-0 text-white">📘 Third Year</h4>
+            </div>
+            <div class="card-body p-4">
+              <h5 class="mb-3 text-center">Uploaded Classes:</h5>
+              <ul class="list-group">
+                {% for sheet_name in data3 %}
+                <li class="list-group-item d-flex justify-content-between align-items-center">
+                  {{ sheet_name|upper }}
+                  <span class="badge">✓</span>
+                </li>
+                {% endfor %}
+              </ul>
+            </div>
           </div>
         </div>
+        {% endif %}
+
+        {% if data4 is not none %}
+        <div class="col">
+          <div class="year-card">
+            <div class="card-header text-center">
+              <h4 class="mb-0 text-white">📙 Fourth Year</h4>
+            </div>
+            <div class="card-body p-4">
+              <h5 class="mb-3 text-center">Uploaded Classes:</h5>
+              <ul class="list-group">
+                {% for sheet_name in data4 %}
+                <li class="list-group-item d-flex justify-content-between align-items-center">
+                  {{ sheet_name|upper }}
+                  <span class="badge">✓</span>
+                </li>
+                {% endfor %}
+              </ul>
+            </div>
+          </div>
+        </div>
+        {% endif %}
       </div>
-      {% endif %}
     </div>
   </body>
 </html>
