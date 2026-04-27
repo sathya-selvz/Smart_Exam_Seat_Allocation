@@ -1,6 +1,10 @@
 # Environment variables
 .env
 
+# Local IDE scratch files
+tempCodeRunnerFile.py
+.ignore/
+
 # Virtual environments
 venv/
 .venv/
@@ -15,8 +19,11 @@ __pycache__/
 dist/
 build/
 
-# Uploads directory
+# Runtime uploads and local datasets
 uploads/
+Student Data/
+Student Timetable/
+Teacher Data/
 
 # OS files
 .DS_Store

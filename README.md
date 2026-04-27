@@ -6,6 +6,23 @@ The application helps in arranging seats for students taking exams, ensuring tha
 
 You can access the live demo of the application [here](https://exam-seat-arrangement.onrender.com/).
 
+## Repository Contents
+
+These are the files and folders that should be committed to GitHub:
+
+- Application code: `app.py`, `classroom_allocator.py`, `data_ingestion.py`, `invigilator_roster.py`, `pdf_export.py`, `seating_engine.py`, `teacher_assignment.py`
+- UI and templates: `templates/`, `static/`, `Screenshots/`
+- Deployment and dependency files: `Procfile`, `requirements.txt`
+- Project docs: `README.md`, `PROJECT_PRESENTATION_MASTER_GUIDE.md`
+- Git settings: `.gitignore`
+
+Keep these files local only and do not upload them to GitHub:
+
+- Environment and virtualenv files: `.env`, `.venv/`, `venv/`, `env/`
+- Runtime uploads: `uploads/`
+- Local datasets: `Student Data/`, `Student Timetable/`, `Teacher Data/`
+- Temporary editor artifacts: `tempCodeRunnerFile.py`, `__pycache__/`
+
 ## Features
 
 - Generate seating arrangements for exams.
@@ -13,6 +30,22 @@ You can access the live demo of the application [here](https://exam-seat-arrange
 - Prevent students with the same subject from sitting close to each other.
 - Choose the particular year or branch. Upload timetable, student details
 - Reset data, including student information and seating arrangements.
+- Cleaned student ingestion pipeline (dedupe by roll number + roll-order normalization).
+- Teacher dataset upload and invigilator assignment (1 teacher per room per slot).
+- Timetable PDF export including teacher and student counts.
+- Generate Seating with automatic allocation and configurable classroom capacities.
+- Invigilator duty roster view and CSV export.
+
+## Phase 2 Architecture
+
+- Data ingestion module: `data_ingestion.py`
+- Seating allocation module: `seating_engine.py`
+- Teacher assignment module: `teacher_assignment.py`
+- PDF export module: `pdf_export.py`
+- Classroom allocation module: `classroom_allocator.py`
+- Invigilator roster export module: `invigilator_roster.py`
+
+Student ingestion now overwrites old student records with a cleaned primary dataset during import.
 
 ## Technologies Used
 - Python
@@ -41,9 +74,28 @@ To use the Exam Seat Arrangement web application, follow these steps:
 
    ```
    git clone https://github.com/afreenpoly/exam-seat-arrangement.git
+   ```
+
 2. Install the required dependencies.
    ```
     pip install -r requirements.txt
+   ```
+
+4. Upload datasets from admin dashboard in this order:
+   - Student data (`/uploaddata`) - cleans, deduplicates, stores as primary dataset
+   - Timetable data (`/timetable`)
+   - Teacher data (`/teachers`)
+
+5. Generate seating (`/seating`) and view seating (`/viewseating`).
+
+6. Export timetable PDF from admin dashboard or `/export/timetable.pdf`.
+
+## New Routes (Generate Seating)
+
+- `/generate-seating`: module chooser page
+- `/generate-seating/automatic`: automatic allocation flow
+- `/roster`: invigilator duty roster view
+- `/roster/export.csv`: invigilator duty roster export
 3. Change MongoDB
    To use your own mongodb Atlas, Copy the string from your Atlas Mongodb ,similar to which i have shown
    ```
