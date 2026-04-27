@@ -1,212 +1,86 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
-    <title>Admin Portal - Login</title>
-    <!-- Bootstrap CSS -->
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Admin Login</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <link
       href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
       rel="stylesheet"
       integrity="sha384-9ndCyUaIbzAi2FUVXJi0CjmCapSmO7SnpJef0486qhLnuZ2cdeRhO02iuK6FUUVM"
       crossorigin="anonymous"
     />
-    <style>
-      body {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        min-height: 100vh;
-      }
-      .header-card {
-        background: white;
-        border-radius: 15px;
-        box-shadow: 0 5px 20px rgba(0,0,0,0.1);
-        padding: 1.5rem;
-        margin-bottom: 2rem;
-        position: sticky;
-        top: 0;
-        z-index: 1000;
-      }
-      .form-container {
-        min-height: 60vh;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 2rem;
-      }
-      .auth-card {
-        background: white;
-        border-radius: 20px;
-        box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-        padding: 2.5rem;
-        width: 100%;
-        max-width: 450px;
-      }
-      .btn-primary {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        border: none;
-        padding: 12px 30px;
-        font-weight: 600;
-        width: 100%;
-      }
-      .btn-primary:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
-      }
-      .form-control {
-        padding: 12px;
-        border-radius: 8px;
-        border: 2px solid #e0e0e0;
-      }
-      .form-control:focus {
-        border-color: #667eea;
-        box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
-      }
-      .auth-card h2 {
-        color: #667eea;
-        font-weight: 700;
-        margin-bottom: 1.5rem;
-      }
-      .info-badge {
-        background: linear-gradient(135deg, #667eea20 0%, #764ba220 100%);
-        border-left: 4px solid #667eea;
-        padding: 1rem;
-        border-radius: 8px;
-        margin-bottom: 1.5rem;
-      }
-    </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='public_ui.css') }}" />
   </head>
   <body>
-    <div class="container py-4">
-      <div class="header-card">
-        <div class="d-flex justify-content-between align-items-center">
-          <h4 class="mb-0">🔐 Admin Portal</h4>
-          <a href="/" class="btn btn-outline-secondary btn-sm">🏠 Home</a>
+    <div class="public-shell">
+      <div class="auth-card p-4 p-md-5">
+        <div class="text-center mb-4">
+          <h1 class="h4 fw-bold mb-2">Exam Hall Management System</h1>
+          <p class="text-muted mb-0">Administrator access portal</p>
         </div>
-      </div>
-    </div>
 
-    <div class="container form-container">
-      <div class="auth-card">
-        <form method="POST" action="{{ url_for('login') }}">
-          <h2 class="text-center">🔑 Admin Login</h2>
-          
-          <div class="info-badge">
-            <small class="text-muted">
-              <strong>Default Credentials:</strong><br>
-              Username: <code class="text-primary">admin</code><br>
-              Password: <code class="text-primary">admin</code>
-            </small>
-          </div>
-          
+        <form method="POST" action="{{ url_for('login') }}" class="mb-4">
+          <h2 class="h5 mb-3">Sign In</h2>
           <div class="mb-3">
-            <label for="username" class="form-label fw-semibold">Username</label>
-            <input
-              type="text"
-              class="form-control"
-              id="username"
-              name="username"
-              placeholder="Enter username"
-              required
-            />
+            <label for="username" class="form-label">Email or Username</label>
+            <input type="text" class="form-control" id="username" name="username" required />
           </div>
           <div class="mb-3">
-            <label for="password" class="form-label fw-semibold">Password</label>
-            <input
-              type="password"
-              class="form-control"
-              id="password"
-              name="password"
-              placeholder="Enter password"
-              required
-            />
+            <label for="password" class="form-label">Password</label>
+            <input type="password" class="form-control" id="password" name="password" required />
           </div>
           <div class="form-check mb-3">
-            <input
-              class="form-check-input"
-              type="checkbox"
-              value="remember-me"
-              id="flexCheckDefault"
-            />
-            <label class="form-check-label text-muted" for="flexCheckDefault">
-              Remember me
-            </label>
+            <input class="form-check-input" type="checkbox" value="remember" id="rememberMe" />
+            <label class="form-check-label" for="rememberMe">Remember Me</label>
           </div>
-          <button class="btn btn-primary" type="submit">
-            Sign In →
-          </button>
+          <button class="btn btn-primary w-100" type="submit">Login</button>
         </form>
-        {% with messages = get_flashed_messages(category_filter=['login-error'])
-        %} {% if messages %}
-        <div class="alert alert-danger border-0 shadow-sm mt-3">
-          <strong>⚠️ Login Failed</strong>
-          <ul class="list-unstyled mb-0 mt-2">
-            {% for message in messages %}
-            <li>{{ message }}</li>
-            {% endfor %}
-          </ul>
-        </div>
-        {% endif %} {% endwith %}
-      </div>
 
-      <div class="auth-card">
+        {% with messages = get_flashed_messages(category_filter=['login-error']) %}
+        {% if messages %}
+        <div class="alert alert-danger">
+          {% for message in messages %}
+          <div>{{ message }}</div>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
+
+        <hr class="my-4" />
+
         <form method="POST" action="{{ url_for('register') }}">
-          <h2 class="text-center">✨ Create Admin Account</h2>
-          <div class="mb-3">
-            <label for="username-field" class="form-label fw-semibold">Username</label>
-            <input
-              type="text"
-              class="form-control"
-              name="username"
-              id="username-field"
-              placeholder="Choose a username"
-              required
-            />
+          <h2 class="h6 mb-3">Create Admin Account</h2>
+          <div class="mb-2">
+            <label for="username-field" class="form-label">Username</label>
+            <input type="text" class="form-control" name="username" id="username-field" required />
           </div>
           <div class="mb-3">
-            <label for="password-field" class="form-label fw-semibold">Password</label>
-            <input
-              type="password"
-              class="form-control"
-              name="password"
-              id="password-field"
-              placeholder="Choose a strong password"
-              required
-            />
+            <label for="password-field" class="form-label">Password</label>
+            <input type="password" class="form-control" name="password" id="password-field" required />
           </div>
-          <div class="form-check mb-3">
-            <input
-              class="form-check-input"
-              type="checkbox"
-              value="remember-me"
-              id="flexCheckDefault2"
-            />
-            <label class="form-check-label text-muted" for="flexCheckDefault2">
-              I agree to the terms and conditions
-            </label>
-          </div>
-          <button class="btn btn-primary" type="submit">
-            Create Account →
-          </button>
+          <button class="btn btn-outline-primary w-100" type="submit">Create Account</button>
         </form>
-        {% with messages =
-        get_flashed_messages(category_filter=['registration-error',
-        'registration-success']) %} {% if messages %} {% for message in messages
-        %} {% if 'registration-success' in message %}
-        <div class="alert alert-success border-0 shadow-sm mt-3">
-          <strong>✅ Success!</strong>
-          <ul class="list-unstyled mb-0 mt-2">
-            <li>{{ message }}</li>
-          </ul>
+
+        {% with messages = get_flashed_messages(category_filter=['registration-error', 'registration-success']) %}
+        {% if messages %}
+          {% for message in messages %}
+            <div class="alert {{ 'alert-success' if 'successful' in message else 'alert-danger' }} mt-3">{{ message }}</div>
+          {% endfor %}
+        {% endif %}
+        {% endwith %}
+
+        <div class="text-center mt-3">
+          <a href="/" class="text-decoration-none">Back to Home</a>
         </div>
-        {% else %}
-        <div class="alert alert-danger border-0 shadow-sm mt-3">
-          <strong>⚠️ Registration Failed</strong>
-          <ul class="list-unstyled mb-0 mt-2">
-            <li>{{ message }}</li>
-          </ul>
-        </div>
-        {% endif %} {% endfor %} {% endif %} {% endwith %}
       </div>
     </div>
-
     <script src="{{ url_for('static', filename='login.js') }}"></script>
   </body>
 </html>

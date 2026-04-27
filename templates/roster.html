@@ -1,0 +1,48 @@
+{% extends 'base_admin.html' %}
+{% set active_page = 'roster' %}
+{% block title %}Invigilator Duty Roster{% endblock %}
+{% block page_title %}Invigilator Duty Roster{% endblock %}
+{% block page_subtitle %}<p class="page-subtitle">Review invigilator duties by date and classroom, then export for operations.</p>{% endblock %}
+
+{% block content %}
+<div class="surface">
+  <div class="surface-body">
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+      <div class="section-title mb-0">Roster Table</div>
+      <div class="d-flex gap-2">
+        <a href="/roster/export.csv" class="btn btn-outline-success">Download CSV</a>
+        <button type="button" class="btn btn-primary" onclick="window.print()">Download PDF</button>
+      </div>
+    </div>
+
+    <div class="table-shell">
+      <div class="table-responsive">
+        <table class="table table-hover">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Time</th>
+              <th>Classroom</th>
+              <th>Teacher</th>
+              <th>Subject</th>
+              <th>Students</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in rows %}
+            <tr>
+              <td>{{ row.date }}</td>
+              <td>{{ row.time }}</td>
+              <td>{{ row.classroom }}</td>
+              <td>{{ row.teacher }}</td>
+              <td>{{ row.subject }}</td>
+              <td>{{ row.student_count }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

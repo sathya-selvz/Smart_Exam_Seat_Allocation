@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}Exam Hall Management System{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+      integrity="sha384-9ndCyUaIbzAi2FUVXJi0CjmCapSmO7SnpJef0486qhLnuZ2cdeRhO02iuK6FUUVM"
+      crossorigin="anonymous"
+    />
+    <link rel="stylesheet" href="{{ url_for('static', filename='admin_ui.css') }}" />
+    {% block head_extra %}{% endblock %}
+  </head>
+  <body>
+    <div class="app-shell">
+      <nav class="navbar navbar-expand-lg topbar px-3">
+        <a class="navbar-brand" href="/admin">Exam Hall Management System</a>
+        <div class="ms-auto d-flex align-items-center gap-2">
+          <a class="btn btn-sm btn-light" href="/">Home</a>
+          <a class="btn btn-sm btn-outline-light" href="/admin/login">Logout</a>
+        </div>
+      </nav>
+
+      <div class="layout">
+        <aside class="sidebar">
+          <div class="menu-title">Navigation</div>
+          <a class="nav-link {% if active_page == 'dashboard' %}active{% endif %}" href="/admin">Dashboard</a>
+          <a class="nav-link {% if active_page == 'students-upload' %}active{% endif %}" href="/uploaddata">Upload Student Data</a>
+          <a class="nav-link {% if active_page == 'classrooms' %}active{% endif %}" href="/class">Classroom Configuration</a>
+          <a class="nav-link {% if active_page == 'seating' %}active{% endif %}" href="/generate-seating">Generate Seating</a>
+          <a class="nav-link {% if active_page == 'teachers' %}active{% endif %}" href="/teachers">Teacher Management</a>
+          <a class="nav-link {% if active_page == 'roster' %}active{% endif %}" href="/roster">Invigilator Duty Roster</a>
+          <a class="nav-link {% if active_page == 'reports' %}active{% endif %}" href="/viewseating">Reports / PDF Downloads</a>
+          <hr class="border-secondary" />
+          <a class="nav-link {% if active_page == 'timetable-upload' %}active{% endif %}" href="/timetable">Upload Timetable</a>
+          <a class="nav-link {% if active_page == 'reset' %}active{% endif %}" href="/reset">Reset Data</a>
+          <small class="d-block mt-2">Production UI redesign only. Backend logic unchanged.</small>
+        </aside>
+
+        <main class="main">
+          <header class="page-head">
+            <h1 class="page-title">{% block page_title %}Admin{% endblock %}</h1>
+            {% block page_subtitle %}<p class="page-subtitle">Manage exam seating operations with a clear workflow.</p>{% endblock %}
+          </header>
+
+          {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+          <div class="flash-list mb-3">
+            {% for category, message in messages %}
+            {% if category in ['success', 'warning', 'danger', 'error', 'info'] %}
+            <div class="alert alert-{{ 'danger' if category == 'error' else category }}">{{ message }}</div>
+            {% else %}
+            <div class="alert alert-info">{{ message }}</div>
+            {% endif %}
+            {% endfor %}
+          </div>
+          {% endif %}
+          {% endwith %}
+
+          {% block content %}{% endblock %}
+        </main>
+      </div>
+    </div>
+
+    <script
+      src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"
+      integrity="sha384-kenU1KFdBIe4zVF0s0G1M5b4hcpxyD9F7jL+10fDTR4zFIbbVYUew+OrCXaRkfj"
+      crossorigin="anonymous"
+    ></script>
+    {% block scripts %}{% endblock %}
+  </body>
+</html>

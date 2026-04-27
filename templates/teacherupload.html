@@ -1,0 +1,83 @@
+{% extends 'base_admin.html' %}
+{% set active_page = 'teachers' %}
+{% block title %}Teacher Management{% endblock %}
+{% block page_title %}Teacher Management{% endblock %}
+{% block page_subtitle %}<p class="page-subtitle">Upload teacher dataset and review assignment-ready teacher records.</p>{% endblock %}
+
+{% block content %}
+<div class="surface mb-3">
+  <div class="surface-body">
+    <div class="section-title">Teacher Dataset Upload</div>
+    <div class="alert alert-info mb-3">
+      Required columns: teacher_id, name, department, availability, max_assignments_per_day.
+    </div>
+    <form action="/teachers" method="POST" enctype="multipart/form-data" class="row g-3 align-items-end">
+      <div class="col-lg-8">
+        <label for="file" class="form-label">Teacher Excel File</label>
+        <input id="file" name="file" type="file" class="form-control" accept=".xls,.xlsx" required />
+      </div>
+      <div class="col-lg-4 d-flex gap-2">
+        <button type="submit" class="btn btn-primary flex-fill">Upload Teachers</button>
+        <a href="/viewteachers" class="btn btn-outline-primary">JSON</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="surface">
+  <div class="surface-body">
+    <div class="section-title">Teacher Assignment Table</div>
+    <div class="table-shell">
+      <div class="table-responsive">
+        <table class="table table-hover" id="teacherTable">
+          <thead>
+            <tr>
+              <th>Teacher ID</th>
+              <th>Name</th>
+              <th>Department</th>
+              <th>Assigned Classroom</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td colspan="4" class="text-muted text-center">Loading teacher records...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  async function loadTeachers() {
+    const tableBody = document.querySelector('#teacherTable tbody');
+    try {
+      const response = await fetch('/viewteachers');
+      const teachers = await response.json();
+
+      if (!Array.isArray(teachers) || teachers.length === 0) {
+        tableBody.innerHTML = '<tr><td colspan="4" class="text-muted text-center">No teacher records available.</td></tr>';
+        return;
+      }
+
+      tableBody.innerHTML = teachers
+        .map((teacher) => `
+          <tr>
+            <td>${teacher.teacher_id || '-'}</td>
+            <td>${teacher.name || '-'}</td>
+            <td>${teacher.department || '-'}</td>
+            <td><span class="text-muted">Assigned during seating generation</span></td>
+          </tr>
+        `)
+        .join('');
+    } catch (e) {
+      tableBody.innerHTML = '<tr><td colspan="4" class="text-danger text-center">Unable to load teacher records.</td></tr>';
+    }
+  }
+
+  loadTeachers();
+</script>
+{% endblock %}

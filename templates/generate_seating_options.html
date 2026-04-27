@@ -1,0 +1,34 @@
+{% extends 'base_admin.html' %}
+{% set active_page = 'seating' %}
+{% block title %}Generate Seating{% endblock %}
+{% block page_title %}Generate Seating{% endblock %}
+{% block page_subtitle %}<p class="page-subtitle">Configure classrooms, run automatic allocation, and open seating previews.</p>{% endblock %}
+
+{% block content %}
+<div class="surface mb-3">
+  <div class="surface-body">
+    <div class="section-title">Classroom Configuration</div>
+    <p class="text-muted">Define available classrooms and capacities before generation.</p>
+    <a href="/class" class="btn btn-outline-primary">Open Classroom Configuration</a>
+  </div>
+</div>
+
+<div class="surface mb-3">
+  <div class="surface-body">
+    <div class="section-title">Generate Seating</div>
+    <p class="text-muted">Run automatic seating allocation with teacher assignment and validation checks.</p>
+    <a href="/generate-seating/automatic" class="btn btn-primary">Generate Automatic Seating</a>
+  </div>
+</div>
+
+<div class="surface">
+  <div class="surface-body">
+    <div class="section-title">Seating Preview and Reports</div>
+    <div class="d-flex flex-wrap gap-2">
+      <a href="/viewseating" class="btn btn-outline-primary">View Seating Preview</a>
+      <a href="/roster" class="btn btn-outline-primary">View Invigilator Roster</a>
+      <a href="/export/timetable.pdf" class="btn btn-outline-success">Download PDF Report</a>
+    </div>
+  </div>
+</div>
+{% endblock %}

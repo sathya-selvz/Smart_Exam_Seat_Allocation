@@ -1,213 +1,98 @@
-<!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Admin Dashboard</title>
-    <!-- Bootstrap CSS -->
-    <link
-      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
-      rel="stylesheet"
-      integrity="sha384-9ndCyUaIbzAi2FUVXJi0CjmCapSmO7SnpJef0486qhLnuZ2cdeRhO02iuK6FUUVM"
-      crossorigin="anonymous"
-    />
-    <style>
-      body {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        min-height: 100vh;
-      }
-      .header-sticky {
-        position: sticky;
-        top: 0;
-        z-index: 1100;
-        padding: 1rem 0;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      }
-      .header-card {
-        background: white;
-        border-radius: 15px;
-        box-shadow: 0 5px 20px rgba(0,0,0,0.1);
-        padding: 1.5rem;
-        margin-bottom: 2rem;
-      }
-      .feature-card {
-        background: white;
-        border-radius: 20px;
-        box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-        padding: 2.5rem;
-        margin-bottom: 2rem;
-        transition: transform 0.3s ease, box-shadow 0.3s ease;
-      }
-      .feature-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 15px 50px rgba(0,0,0,0.3);
-      }
-      .btn-primary {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        border: none;
-        padding: 12px 30px;
-        font-weight: 600;
-      }
-      .btn-primary:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
-      }
-      .nav-link {
-        color: #667eea !important;
-        font-weight: 600;
-        transition: color 0.3s ease;
-      }
-      .nav-link:hover {
-        color: #764ba2 !important;
-      }
-      h1, h2 {
-        color: #667eea;
-        font-weight: 700;
-      }
-      /* Loading screen styles */
-      .loading-screen {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background-color: rgba(0, 0, 0, 0.7);
-        display: none;
-        justify-content: center;
-        align-items: center;
-        z-index: 9999;
-      }
-      .loading-icon {
-        border: 4px solid #f3f3f3;
-        border-top: 4px solid #667eea;
-        border-radius: 50%;
-        width: 50px;
-        height: 50px;
-        animation: spin 1s linear infinite;
-      }
-      @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-      }
-    </style>
-  </head>
-  <body>
-    <div id="loadingScreen" class="loading-screen">
-      <div class="loading-icon"></div>
-    </div>
+{% extends 'base_admin.html' %}
+{% set active_page = 'dashboard' %}
+{% block title %}Admin Dashboard{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+{% block page_subtitle %}<p class="page-subtitle">Track datasets, classrooms, faculty allocation, and exam readiness at a glance.</p>{% endblock %}
 
-    <div class="header-sticky">
-      <div class="container py-2">
-        <div class="header-card">
-          <div class="d-flex flex-column flex-md-row align-items-center">
-            <h4 class="mb-0">🛠️ Admin Dashboard</h4>
-            <nav class="d-flex gap-3 mt-3 mt-md-0 ms-md-auto">
-              <a class="nav-link" href="/">🏠 Home</a>
-              <a class="nav-link" href="/viewdata">📊 View Data</a>
-              <a class="nav-link" href="/viewtimetable">📅 Timetable</a>
-              <a class="nav-link" href="/reset">🗑️ Reset</a>
-            </nav>
+{% block content %}
+<div class="row g-3 mb-3">
+  <div class="col-md-6 col-xl-3">
+    <div class="metric-card">
+      <div class="metric-label">Total Students</div>
+      <div class="metric-value" id="metricStudents">0</div>
+    </div>
+  </div>
+  <div class="col-md-6 col-xl-3">
+    <div class="metric-card">
+      <div class="metric-label">Total Classrooms</div>
+      <div class="metric-value" id="metricClassrooms">0</div>
+    </div>
+  </div>
+  <div class="col-md-6 col-xl-3">
+    <div class="metric-card">
+      <div class="metric-label">Total Teachers</div>
+      <div class="metric-value" id="metricTeachers">0</div>
+    </div>
+  </div>
+  <div class="col-md-6 col-xl-3">
+    <div class="metric-card">
+      <div class="metric-label">Upcoming Exams</div>
+      <div class="metric-value" id="metricExams">0</div>
+    </div>
+  </div>
+</div>
+
+<div class="surface mb-3">
+  <div class="surface-body">
+    <div class="section-title">Operations</div>
+    <div class="row g-3">
+      <div class="col-lg-6">
+        <div class="p-3 border rounded-3 h-100">
+          <h6 class="fw-bold">Data Intake</h6>
+          <p class="text-muted mb-3">Upload student records and exam timetables for all years.</p>
+          <div class="d-grid gap-2 d-sm-flex">
+            <a href="/uploaddata" class="btn btn-primary">Upload Student Data</a>
+            <a href="/timetable" class="btn btn-outline-primary">Upload Timetable</a>
+          </div>
+        </div>
+      </div>
+      <div class="col-lg-6">
+        <div class="p-3 border rounded-3 h-100">
+          <h6 class="fw-bold">Seating Workflow</h6>
+          <p class="text-muted mb-3">Configure classrooms, run seating, and open reports.</p>
+          <div class="d-grid gap-2 d-sm-flex flex-wrap">
+            <a href="/class" class="btn btn-outline-primary">Classroom Configuration</a>
+            <a href="/generate-seating" class="btn btn-outline-primary">Generate Seating</a>
+            <a href="/viewseating" class="btn btn-outline-primary">Seating Preview</a>
+            <a href="/roster" class="btn btn-outline-primary">Duty Roster</a>
+            <a href="/export/timetable.pdf" class="btn btn-outline-success">Download PDF</a>
           </div>
         </div>
       </div>
     </div>
+  </div>
+</div>
+{% endblock %}
 
-    <div class="container py-4">
-      <div class="row">
-        <div class="col-lg-6 mb-4">
-          <div class="feature-card">
-            <h2 class="mb-4">📚 Upload Student Data</h2>
-            <p class="text-muted mb-3">
-              Upload student data from all branches and years as an Excel file.
-            </p>
-            <div class="alert alert-info border-0 mb-4">
-              <strong>Format Guidelines:</strong>
-              <ul class="mb-2 mt-2">
-                <li>Sheet name: Class name (e.g., CSA, CE, EE)</li>
-                <li>Columns: "rollnum" & "name"</li>
-                <li>Auto-format: Roll numbers become <code>YYDeptSerial</code></li>
-                <li>Example: 12113001 → <strong>24CE001</strong></li>
-              </ul>
-            </div>
-            <a href="/uploaddata" class="btn btn-primary btn-lg w-100">
-              📤 Upload Student Data
-            </a>
-          </div>
-        </div>
-        
-        <div class="col-lg-6 mb-4">
-          <div class="feature-card">
-            <h2 class="mb-4">📅 Upload Timetable</h2>
-            <p class="text-muted mb-3">
-              Upload exam timetables for all branches and years as an Excel file.
-            </p>
-            <div class="alert alert-info border-0 mb-4">
-              <strong>Format Guidelines:</strong>
-              <ul class="mb-2 mt-2">
-                <li>Sheet name: Class name (e.g., CSA, CE, EE)</li>
-                <li>Columns: "date" & "subject"</li>
-                <li>Date format: DD-MM-YYYY or Excel date</li>
-                <li>Subject: Full subject name</li>
-              </ul>
-            </div>
-            <a href="/timetable" class="btn btn-primary btn-lg w-100">
-              📤 Upload Timetable
-            </a>
-          </div>
-        </div>
-      </div>
-      
-      <div class="row">
-        <div class="col-lg-6 mb-4">
-          <div class="feature-card">
-            <h2 class="mb-4">🏛️ Classroom Management</h2>
-            <p class="text-muted mb-3">
-              Select available classrooms and configure seating arrangements.
-            </p>
-            <a href="/class" class="btn btn-primary btn-lg w-100">
-              🛠️ Manage Classrooms
-            </a>
-          </div>
-        </div>
-        
-        <div class="col-lg-6 mb-4">
-          <div class="feature-card">
-            <h2 class="mb-4">🎯 Generate Seating</h2>
-            <p class="text-muted mb-3">
-              Auto-generate optimal seating arrangements with anti-cheating algorithm.
-            </p>
-            <div class="d-grid gap-2">
-              <a href="/seating" class="btn btn-primary btn-lg" onclick="showLoadingScreen()">
-                ⚡ Generate Seating
-              </a>
-              <a href="/viewseating" class="btn btn-outline-primary btn-lg">
-                👁️ View Results
-              </a>
-            </div>
-            {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-              {% for category, message in messages %}
-                {% if category == 'success' %}
-                  <div class="alert alert-success border-0 shadow-sm mt-3">
-                    <strong>✅ Success!</strong><br>{{ message }}
-                  </div>
-                {% elif category == 'error' %}
-                  <div class="alert alert-danger border-0 shadow-sm mt-3">
-                    <strong>⚠️ Error!</strong><br>{{ message }}
-                  </div>
-                {% endif %}
-              {% endfor %}
-            {% endif %}
-            {% endwith %}
-          </div>
-        </div>
-      </div>
-    </div>
+{% block scripts %}
+<script>
+  async function fetchCount(url, fallback = 0) {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) return fallback;
+      const payload = await response.json();
+      if (Array.isArray(payload)) return payload.length;
+      if (payload && typeof payload === 'object') return Object.keys(payload).length;
+      return fallback;
+    } catch (e) {
+      return fallback;
+    }
+  }
 
-    <script>
-      function showLoadingScreen() {
-        const loadingScreen = document.getElementById("loadingScreen");
-        loadingScreen.style.display = "flex";
-      }
-    </script>
-  </body>
-</html>
+  async function initMetrics() {
+    const [students, teachers, exams, classrooms] = await Promise.all([
+      fetchCount('/viewdata', 0),
+      fetchCount('/viewteachers', 0),
+      fetchCount('/static/dates.txt', 0),
+      fetchCount('/static/stuarrange.txt', 0)
+    ]);
+
+    document.getElementById('metricStudents').textContent = students;
+    document.getElementById('metricTeachers').textContent = teachers;
+    document.getElementById('metricExams').textContent = exams;
+    document.getElementById('metricClassrooms').textContent = classrooms;
+  }
+
+  initMetrics();
+</script>
+{% endblock %}

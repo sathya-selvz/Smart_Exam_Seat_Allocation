@@ -1,75 +1,28 @@
-<!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <title>View Data</title>
-    <link
-      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
-      rel="stylesheet"
-    />
-    <style>
-      body {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        min-height: 100vh;
-      }
-      .header-card {
-        background: white;
-        border-radius: 15px;
-        box-shadow: 0 5px 20px rgba(0,0,0,0.1);
-        padding: 1.5rem;
-        margin-bottom: 2rem;
-        position: sticky;
-        top: 0;
-        z-index: 1000;
-      }
-      .data-card {
-        background: white;
-        border-radius: 20px;
-        box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-        padding: 2.5rem;
-        margin-bottom: 2rem;
-      }
-      .year-header {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 1rem;
-        border-radius: 10px;
-        margin-bottom: 1.5rem;
-        font-weight: 700;
-      }
-      pre {
-        background: #f8f9fa;
-        border-radius: 10px;
-        padding: 1.5rem;
-        border-left: 4px solid #667eea;
-        max-height: 500px;
-        overflow-y: auto;
-      }
-      h4 {
-        color: #667eea;
-        font-weight: 700;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="container py-4">
-      <div class="header-card">
-        <div class="d-flex justify-content-between align-items-center">
-          <h4 class="mb-0">📊 View Student Data</h4>
-          <a href="/admin" class="btn btn-outline-secondary btn-sm">🏠 Admin Home</a>
-        </div>
-      </div>
-      
-      <div class="data-card">
-        <h2 class="year-header text-center">📗 Second Year Data</h2>
-        <pre>{{data2|tojson(indent=4)}}</pre>
-        
-        <h2 class="year-header text-center mt-5">📘 Third Year Data</h2>
-        <pre>{{data3|tojson(indent=4)}}</pre>
-        
-        <h2 class="year-header text-center mt-5">📙 Fourth Year Data</h2>
-        <pre>{{data4|tojson(indent=4)}}</pre>
-      </div>
-    </div>
-  </body>
-</html>
+{% extends 'base_admin.html' %}
+{% set active_page = 'reports' %}
+{% block title %}Student Data Preview{% endblock %}
+{% block page_title %}Student Data Preview{% endblock %}
+{% block page_subtitle %}<p class="page-subtitle">Raw uploaded payload grouped by year for quick verification.</p>{% endblock %}
+
+{% block content %}
+<div class="surface mb-3">
+  <div class="surface-body">
+    <div class="section-title">Second Year Data</div>
+    <pre class="mb-0">{{data2|tojson(indent=4)}}</pre>
+  </div>
+</div>
+
+<div class="surface mb-3">
+  <div class="surface-body">
+    <div class="section-title">Third Year Data</div>
+    <pre class="mb-0">{{data3|tojson(indent=4)}}</pre>
+  </div>
+</div>
+
+<div class="surface">
+  <div class="surface-body">
+    <div class="section-title">Fourth Year Data</div>
+    <pre class="mb-0">{{data4|tojson(indent=4)}}</pre>
+  </div>
+</div>
+{% endblock %}

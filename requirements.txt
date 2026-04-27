@@ -16,4 +16,5 @@ virtualenv==20.20.0
 Werkzeug==2.2.3
 xlrd==2.0.1
 gunicorn==20.1.0
+reportlab==4.2.2
 

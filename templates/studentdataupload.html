@@ -1,199 +1,91 @@
-<!DOCTYPE html>
-<html>
-  <head>
-    <title>Upload Student Data</title>
-    <!-- Bootstrap CSS -->
-    <link
-      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
-      rel="stylesheet"
-      integrity="sha384-9ndCyUaIbzAi2FUVXJi0CjmCapSmO7SnpJef0486qhLnuZ2cdeRhO02iuK6FUUVM"
-      crossorigin="anonymous"
-    />
-    <style>
-      body {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        min-height: 100vh;
-      }
-      .header-card {
-        background: white;
-        border-radius: 15px;
-        box-shadow: 0 5px 20px rgba(0,0,0,0.1);
-        padding: 1.5rem;
-        margin-bottom: 2rem;
-        position: sticky;
-        top: 0;
-        z-index: 1000;
-      }
-      .upload-card {
-        background: white;
-        border-radius: 20px;
-        box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-        padding: 2.5rem;
-        margin-bottom: 2rem;
-        transition: transform 0.3s ease;
-      }
-      .upload-card:hover {
-        transform: translateY(-5px);
-      }
-      .year-section {
-        background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
-        border-radius: 15px;
-        padding: 2rem;
-        margin-bottom: 1.5rem;
-        border: 2px dashed #667eea;
-        transition: all 0.3s ease;
-      }
-      .year-section:hover {
-        border-color: #764ba2;
-        background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
-      }
-      .file-input-wrapper {
-        position: relative;
-        overflow: hidden;
-        display: inline-block;
-        width: 100%;
-      }
-      .file-input-wrapper input[type=file] {
-        position: absolute;
-        left: -9999px;
-      }
-      .file-input-label {
-        display: block;
-        padding: 1rem;
-        background: white;
-        border: 2px solid #e0e0e0;
-        border-radius: 10px;
-        cursor: pointer;
-        text-align: center;
-        transition: all 0.3s ease;
-      }
-      .file-input-label:hover {
-        border-color: #667eea;
-        background: #f8f9ff;
-      }
-      .file-input-label.has-file {
-        border-color: #28a745;
-        background: #f0fff4;
-      }
-      .btn-primary {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        border: none;
-        padding: 12px 40px;
-        font-weight: 600;
-        font-size: 1.1rem;
-      }
-      .btn-primary:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
-      }
-      .info-box {
-        background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
-        border-left: 4px solid #667eea;
-        padding: 1.5rem;
-        border-radius: 10px;
-        margin-bottom: 2rem;
-      }
-      h3 {
-        color: #667eea;
-        font-weight: 700;
-        margin-bottom: 1rem;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="container py-4">
-      <div class="header-card">
-        <div class="d-flex justify-content-between align-items-center">
-          <h4 class="mb-0">📚 Upload Student Data</h4>
-          <a href="/admin" class="btn btn-outline-secondary btn-sm">🏠 Admin Home</a>
-        </div>
+{% extends 'base_admin.html' %}
+{% set active_page = 'students-upload' %}
+{% block title %}Upload Student Data{% endblock %}
+{% block page_title %}Upload Student Dataset{% endblock %}
+{% block page_subtitle %}<p class="page-subtitle">Upload three workbooks in order: second, third, and fourth year.</p>{% endblock %}
+
+{% block content %}
+<div class="surface mb-3">
+  <div class="surface-body">
+    <div class="section-title">Dataset Upload</div>
+    <form action="/upload" method="POST" enctype="multipart/form-data" class="mb-4">
+      <label for="files" class="form-label">Excel Files (.xls, .xlsx)</label>
+      <input type="file" name="files" id="files" accept=".xls,.xlsx" multiple class="form-control" required />
+      <div class="d-flex justify-content-between align-items-center mt-3 flex-wrap gap-2">
+        <div id="validationBadge" class="badge text-bg-secondary">Validation Status: Awaiting upload</div>
+        <button type="submit" class="btn btn-primary">Upload Files</button>
       </div>
+    </form>
 
-      <div class="upload-card">
-        <div class="info-box">
-          <h5 class="fw-bold mb-3">📝 Format Guidelines:</h5>
-          <ul class="mb-0">
-            <li><strong>Sheet name:</strong> Class name (e.g., CSA, CE, EE)</li>
-            <li><strong>Columns:</strong> "rollnum" & "name"</li>
-            <li><strong>Auto-format:</strong> Roll numbers become <code>YYDeptSerial</code></li>
-            <li><strong>Example:</strong> 12113001 → <strong>24CE001</strong></li>
-          </ul>
-        </div>
+    <div class="section-title">Format Rules</div>
+    <ul class="mb-0 text-muted">
+      <li>Sheet name should be a class name such as CSA, CE, EE.</li>
+      <li>Required columns are rollnum and name.</li>
+      <li>Upload exactly three files for second, third, and fourth year.</li>
+    </ul>
+  </div>
+</div>
 
-        <form action="/upload" method="POST" enctype="multipart/form-data">
-          <div class="row">
-            <div class="col-12">
-              <div class="year-section">
-                <h3>📚 All Years (Select 3 Files)</h3>
-                <p class="text-muted mb-3">Select files in order: Second Year, Third Year, Fourth Year.</p>
-                <div class="file-input-wrapper">
-                  <input
-                    type="file"
-                    name="files"
-                    id="files"
-                    accept=".xls,.xlsx"
-                    multiple
-                    onchange="updateFileNames('files', 'label-files')"
-                  />
-                  <label for="files" class="file-input-label" id="label-files">
-                    <div class="mb-2" style="font-size: 2rem;">📄</div>
-                    <div class="fw-semibold">Choose 3 Files</div>
-                    <small class="text-muted">No files chosen</small>
-                  </label>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="text-center mt-4">
-            <button type="submit" class="btn btn-primary btn-lg">
-              📤 Upload Files
-            </button>
-          </div>
-
-          {% with messages = get_flashed_messages(with_categories=true) %}
-          {% if messages %}
-            {% for category, message in messages %}
-              {% if category == 'success' %}
-                <div class="alert alert-success border-0 shadow-sm mt-4">
-                  <strong>✅ Success!</strong><br>{{ message }}
-                </div>
-              {% elif category == 'error' %}
-                <div class="alert alert-danger border-0 shadow-sm mt-4">
-                  <strong>⚠️ Error!</strong><br>{{ message }}
-                </div>
-              {% endif %}
-            {% endfor %}
-          {% endif %}
-          {% endwith %}
-        </form>
+<div class="surface">
+  <div class="surface-body">
+    <div class="section-title">Dataset Preview</div>
+    <div class="table-shell">
+      <div class="table-responsive">
+        <table class="table table-hover" id="previewTable">
+          <thead>
+            <tr>
+              <th>File Name</th>
+              <th>Estimated Year</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td colspan="3" class="text-muted text-center">Choose files to preview validation status.</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
+  </div>
+</div>
+{% endblock %}
 
-    <script>
-      function updateFileNames(inputId, labelId) {
-        const input = document.getElementById(inputId);
-        const label = document.getElementById(labelId);
-        const files = Array.from(input.files || []);
-        const fileNames = files.map((file) => file.name);
-        const display = fileNames.length ? fileNames.join(', ') : 'No files chosen';
-        
-        if (files.length > 0) {
-          label.classList.add('has-file');
-          label.innerHTML = `
-            <div class="mb-2" style="font-size: 2rem;">✅</div>
-            <div class="fw-semibold text-success">${files.length} File(s) Selected</div>
-            <small class="text-muted">${display}</small>
-          `;
-        } else {
-          label.classList.remove('has-file');
-          label.innerHTML = `
-            <div class="mb-2" style="font-size: 2rem;">📄</div>
-            <div class="fw-semibold">Choose 3 Files</div>
-            <small class="text-muted">No files chosen</small>
-          `;
-        }
-      }
-    </script>
-  </body>
-</html>
+{% block scripts %}
+<script>
+  function detectYear(name) {
+    const value = (name || '').toLowerCase();
+    if (value.includes('second') || value.includes('2nd') || value.includes('year2')) return 'Second Year';
+    if (value.includes('third') || value.includes('3rd') || value.includes('year3')) return 'Third Year';
+    if (value.includes('fourth') || value.includes('4th') || value.includes('year4')) return 'Fourth Year';
+    return 'Unrecognized';
+  }
+
+  document.getElementById('files').addEventListener('change', function (event) {
+    const files = Array.from(event.target.files || []);
+    const tableBody = document.querySelector('#previewTable tbody');
+    const validationBadge = document.getElementById('validationBadge');
+
+    if (files.length === 0) {
+      tableBody.innerHTML = '<tr><td colspan="3" class="text-muted text-center">Choose files to preview validation status.</td></tr>';
+      validationBadge.className = 'badge text-bg-secondary';
+      validationBadge.textContent = 'Validation Status: Awaiting upload';
+      return;
+    }
+
+    tableBody.innerHTML = files
+      .map((file) => {
+        const year = detectYear(file.name);
+        const status = year === 'Unrecognized' ? 'Needs naming check' : 'Ready';
+        const badge = year === 'Unrecognized' ? 'text-bg-warning' : 'text-bg-success';
+        return `<tr><td>${file.name}</td><td>${year}</td><td><span class="badge ${badge}">${status}</span></td></tr>`;
+      })
+      .join('');
+
+    validationBadge.className = files.length === 3 ? 'badge text-bg-success' : 'badge text-bg-warning';
+    validationBadge.textContent = files.length === 3
+      ? 'Validation Status: Ready for upload'
+      : 'Validation Status: Select exactly 3 files';
+  });
+</script>
+{% endblock %}

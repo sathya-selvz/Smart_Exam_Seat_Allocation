@@ -1,0 +1,67 @@
+:root {
+  --primary: #1f4ab8;
+  --primary-2: #3b2fa5;
+  --primary-3: #5f2f98;
+  --ink: #111827;
+  --muted: #6b7280;
+  --panel: rgba(255, 255, 255, 0.96);
+  --line: #e5e7eb;
+}
+
+body {
+  margin: 0;
+  font-family: "Poppins", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at 12% 12%, rgba(31, 74, 184, 0.2), transparent 35%),
+    radial-gradient(circle at 80% 8%, rgba(95, 47, 152, 0.18), transparent 35%),
+    linear-gradient(120deg, #0f1d47 0%, #252f75 50%, #502785 100%);
+  min-height: 100vh;
+}
+
+.public-shell {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+}
+
+.public-card {
+  width: 100%;
+  max-width: 980px;
+  background: var(--panel);
+  border-radius: 20px;
+  box-shadow: 0 20px 50px rgba(10, 15, 40, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--panel);
+  border-radius: 20px;
+  box-shadow: 0 20px 50px rgba(10, 15, 40, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.form-control {
+  border-radius: 10px;
+  border: 1px solid #dbe2ea;
+}
+
+.form-control:focus {
+  border-color: rgba(31, 74, 184, 0.55);
+  box-shadow: 0 0 0 0.2rem rgba(31, 74, 184, 0.15);
+}
+
+.btn-primary {
+  border: 0;
+  border-radius: 10px;
+  background: linear-gradient(110deg, var(--primary) 0%, var(--primary-2) 55%, var(--primary-3) 100%);
+  font-weight: 600;
+}
+
+.text-muted {
+  color: var(--muted) !important;
+}

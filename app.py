@@ -1,15 +1,31 @@
-from flask import Flask, flash, render_template, request, redirect, url_for, jsonify, session, Markup
+from flask import Flask, flash, render_template, request, redirect, url_for, jsonify, session, Markup, Response
 from datetime import datetime
 from static.converter import excel_to_json
 import os
 import time
-import math
 import json
 from werkzeug.utils import secure_filename
-from openpyxl import load_workbook
 from dotenv import load_dotenv
 from pymongo import MongoClient
 from flask_bcrypt import Bcrypt
+from pymongo import UpdateOne
+from classroom_allocator import classroom_catalog, expand_classrooms_for_capacity, normalize_capacity
+from invigilator_roster import to_csv_bytes
+from data_ingestion import (
+    build_validation_row,
+    clean_and_dedupe_students,
+    department_key_from_roll_or_meta,
+    normalize_rollnum,
+)
+from teacher_assignment import assign_teachers_for_date
+from pdf_export import build_student_seating_pdf, build_timetable_pdf
+from seating_engine import (
+    BENCHES_PER_CLASSROOM,
+    CLASSROOM_CAPACITY,
+    allocate_classrooms,
+    build_candidates_for_date,
+    validate_layout,
+)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -34,6 +50,7 @@ client = MongoClient(MONGO_URI)
 db = client.Studetails
 usercollections = db.users
 stucollections = db.student
+teachercollections = db.teachers
 
 # Create default admin user if it doesn't exist
 def create_default_admin():
@@ -51,44 +68,6 @@ def create_default_admin():
 create_default_admin()
 
 # Helper function to generate formatted roll numbers
-def generate_formatted_rollnum(year, sheet_name, serial_number):
-    """
-    Generate readable roll numbers based on year and department
-    Examples:
-    - 2nd year CE: 24CE001
-    - 3rd year CSA: 23MCA013
-    - 4th year EE: 22EE014
-    """
-    # Determine admission year prefix
-    year_prefix = {
-        "SecondYear": "24",    # Admitted in 2024
-        "ThirdYear": "23",     # Admitted in 2023
-        "FourthYear": "22"     # Admitted in 2022
-    }
-    
-    # Department code mapping (uppercase)
-    dept_mapping = {
-        "csa": "MCA",
-        "csb": "MCA",
-        "ec": "EC",
-        "ee": "MEE",
-        "ce": "CE",
-        "me": "ME",
-        "mea": "ME",
-        "meb": "ME",
-        "ad": "AD",
-        "mr": "MR",
-        "rb": "RB"
-    }
-    
-    year_code = year_prefix.get(year, "24")
-    dept_code = dept_mapping.get(sheet_name.lower(), sheet_name.upper())
-    
-    # Format: YYDEPT### (e.g., 24CE001, 23MCA013) - all uppercase
-    formatted_roll = f"{year_code}{dept_code}{serial_number:03d}"
-    
-    return formatted_roll
-
 def detect_year_from_filename(filename):
     name = (filename or "").lower()
     if "second" in name or "2nd" in name or "year2" in name:
@@ -99,32 +78,268 @@ def detect_year_from_filename(filename):
         return "FourthYear"
     return None
 
-def normalize_student_excel(file_path, year_label):
-    workbook = load_workbook(file_path)
-    try:
-        for sheet_name in workbook.sheetnames:
-            sheet = workbook[sheet_name]
-            roll_col = None
-            for idx, cell in enumerate(sheet[1], start=1):
-                value = str(cell.value).strip().lower() if cell.value is not None else ""
-                if value in ("rollnum", "roll number", "rollno", "roll no"):
-                    roll_col = idx
-                    break
-            if roll_col is None:
+def insert_students_with_validation(year_data, year_label):
+    report_rows = []
+    inserted_total = 0
+    skipped_existing_total = 0
+    dedup_in_file_total = 0
+
+    if year_data is None:
+        return report_rows, inserted_total, skipped_existing_total, dedup_in_file_total
+
+    year_numeric_map = {
+        "SecondYear": 2,
+        "ThirdYear": 3,
+        "FourthYear": 4,
+    }
+    year_number_default = year_numeric_map.get(year_label, 2)
+
+    for sheet_name, sheet_data in year_data.items():
+        raw_records = []
+        for item in sheet_data:
+            normalized_roll = normalize_rollnum(item.get("rollnum"))
+            if not normalized_roll:
                 continue
 
-            for row_idx in range(2, sheet.max_row + 1):
-                serial_number = row_idx - 1
-                formatted_roll = generate_formatted_rollnum(year_label, sheet_name, serial_number)
-                sheet.cell(row=row_idx, column=roll_col).value = formatted_roll
-        workbook.save(file_path)
-    finally:
-        workbook.close()
+            try:
+                year_number = int(item.get("year", year_number_default))
+            except (TypeError, ValueError):
+                year_number = year_number_default
+
+            raw_records.append({
+                **item,
+                "original_rollnum": item.get("rollnum"),
+                "rollnum": normalized_roll,
+                "name": str(item.get("name", "")).strip(),
+                "department": str(item.get("department", sheet_name)).strip().upper(),
+                "year": year_number,
+            })
+
+        existing_rolls = set()
+        if raw_records:
+            rollnums = [normalize_rollnum(record.get("rollnum")) for record in raw_records if record.get("rollnum")]
+            existing_rolls = set(
+                stucollections.distinct("rollnum", {"rollnum": {"$in": rollnums}})
+            )
+
+        cleaned_records, stats = clean_and_dedupe_students(
+            raw_records,
+            year_label,
+            sheet_name,
+            existing_rolls=existing_rolls,
+        )
+        dedup_in_file_total += stats["duplicate_in_file"]
+        skipped_existing = stats["duplicate_existing"]
+        skipped_existing_total += skipped_existing
+        inserted_total += len(cleaned_records)
+
+        if cleaned_records:
+            stucollections.insert_many(cleaned_records)
+
+        sample_roll = cleaned_records[0]["rollnum"] if cleaned_records else ""
+        report_rows.append(
+            build_validation_row(
+                sample_rollnum=sample_roll,
+                year_label=year_label,
+                sheet_name=sheet_name,
+                raw=stats["raw"],
+                clean=stats["clean"],
+                duplicate_existing=stats["duplicate_existing"],
+            )
+        )
+
+    return report_rows, inserted_total, skipped_existing_total, dedup_in_file_total
+
+
+def run_data_integrity_check(remove_duplicates=True):
+    docs = list(
+        stucollections.find({}, {"_id": 1, "rollnum": 1, "Year": 1, "sheet_name": 1})
+    )
+
+    by_roll = {}
+    dept_actual = {}
+    dept_unique = {}
+
+    for doc in docs:
+        roll = normalize_rollnum(doc.get("rollnum"))
+        if not roll:
+            continue
+
+        year_label = doc.get("Year")
+        sheet_name = doc.get("sheet_name")
+        dept_key = department_key_from_roll_or_meta(roll, year_label, sheet_name)
+
+        dept_actual[dept_key] = dept_actual.get(dept_key, 0) + 1
+        dept_unique.setdefault(dept_key, set()).add(roll)
+
+        if roll not in by_roll:
+            by_roll[roll] = []
+        by_roll[roll].append(doc)
+
+    duplicate_groups = {roll: rows for roll, rows in by_roll.items() if len(rows) > 1}
+    removed_ids = []
+    dept_duplicates_removed = {}
+
+    for roll, rows in duplicate_groups.items():
+        rows_sorted = sorted(rows, key=lambda row: str(row.get("_id")))
+        keep = rows_sorted[0]
+        extras = rows_sorted[1:]
+        dept_key = department_key_from_roll_or_meta(
+            keep.get("rollnum"), keep.get("Year"), keep.get("sheet_name")
+        )
+        dept_duplicates_removed[dept_key] = dept_duplicates_removed.get(dept_key, 0) + len(extras)
+        removed_ids.extend([row["_id"] for row in extras])
+
+    if remove_duplicates and removed_ids:
+        stucollections.delete_many({"_id": {"$in": removed_ids}})
+
+    report = []
+    all_depts = sorted(set(dept_actual.keys()) | set(dept_unique.keys()) | set(dept_duplicates_removed.keys()))
+    for dept in all_depts:
+        actual = dept_actual.get(dept, 0)
+        expected = len(dept_unique.get(dept, set()))
+        duplicates_removed = dept_duplicates_removed.get(dept, 0)
+        report.append(
+            {
+                "department": dept,
+                "expected": expected,
+                "actual": actual,
+                "duplicates_removed": duplicates_removed,
+            }
+        )
+
+    summary = {
+        "total_rows": len(docs),
+        "unique_rollnums": len(by_roll),
+        "duplicate_rows_detected": len(removed_ids),
+        "duplicate_roll_groups": len(duplicate_groups),
+        "report": report,
+    }
+    return summary
+
+
+def load_teachers_from_excel(file_path):
+    payload = excel_to_json(file_path)
+    rows = []
+    for _, teachers in payload.items():
+        rows.extend(teachers)
+
+    cleaned = []
+    seen = set()
+    for row in rows:
+        teacher_id = str(row.get("teacher_id", "")).strip().upper()
+        if not teacher_id or teacher_id in seen:
+            continue
+        seen.add(teacher_id)
+
+        cleaned.append(
+            {
+                "teacher_id": teacher_id,
+                "name": str(row.get("name", "Unknown")).strip() or "Unknown",
+                "department": str(row.get("department", "")).strip().upper() or "GEN",
+                "availability": str(row.get("availability", "all")).strip() or "all",
+                "max_assignments_per_day": int(row.get("max_assignments_per_day", 1) or 1),
+            }
+        )
+
+    cleaned.sort(key=lambda item: item["teacher_id"])
+    return cleaned
+
+
+def _time_for_subject_date(date_value, subject_name):
+    students = stucollections.find(
+        {"subject": {"$elemMatch": {"date": date_value}}},
+        {"subject": 1},
+    )
+    for student in students:
+        for subject in student.get("subject", []):
+            if str(subject.get("date", "")).strip() != str(date_value).strip():
+                continue
+            if str(subject.get("subject", "")).strip() != str(subject_name).strip():
+                continue
+            if subject.get("time") is not None:
+                text = str(subject.get("time")).strip()
+                if text:
+                    return text
+    return "N/A"
+
+
+def _classroom_summary_rows(date_value, classroom_layouts):
+    rows = []
+    for classroom in classroom_layouts:
+        subjects = set()
+        student_count = 0
+        for bench in classroom.get("benches", []):
+            left = bench.get("left")
+            right = bench.get("right")
+            if left:
+                student_count += 1
+                subjects.add(str(left.get("exam", "Unknown")))
+            if right:
+                student_count += 1
+                subjects.add(str(right.get("exam", "Unknown")))
+
+        teacher = classroom.get("teacher") or {"teacher_id": "UNASSIGNED", "name": "Unassigned"}
+        teacher_text = f"{teacher.get('teacher_id', 'UNASSIGNED')} - {teacher.get('name', 'Unassigned')}"
+
+        if not subjects:
+            rows.append(
+                {
+                    "date": date_value,
+                    "time": "N/A",
+                    "subject": "N/A",
+                    "classroom": classroom.get("class_name"),
+                    "teacher": teacher_text,
+                    "student_count": student_count,
+                }
+            )
+            continue
+
+        for subject_name in sorted(subjects):
+            rows.append(
+                {
+                    "date": date_value,
+                    "time": _time_for_subject_date(date_value, subject_name),
+                    "subject": subject_name,
+                    "classroom": classroom.get("class_name"),
+                    "teacher": teacher_text,
+                    "student_count": student_count,
+                }
+            )
+    return rows
+
+
+def _load_exam_dates():
+    with open('static/dates.txt', 'r') as file:
+        return json.load(file)
+
+
+def _teachers_for_ui():
+    return list(
+        teachercollections.find(
+            {},
+            {"_id": 0, "teacher_id": 1, "name": 1, "department": 1},
+        ).sort("teacher_id", 1)
+    )
+
+
+def _build_roster_rows():
+    rows = []
+    for date_value, layouts in seating_data.items():
+        rows.extend(_classroom_summary_rows(date_value, layouts))
+    rows.sort(key=lambda row: (row.get("date", ""), row.get("time", ""), row.get("classroom", "")))
+    return rows
+
+
+CLASSROOM_CATALOG = classroom_catalog()
+CLASSROOM_NAMES = list(CLASSROOM_CATALOG.keys())
 
 # global variables
 listy = []
 filled = False
 seating_data = {}  # Store seating results for immediate display
+teacher_assignments_data = {}
+timetable_pdf_rows = []
 with open('static/dates.txt', 'r') as datefiles:
     dates = json.load(datefiles)
 
@@ -186,6 +401,16 @@ def admin():
     return render_template('adminhome.html')
 
 
+@app.route('/generate-seating', methods=['GET'])
+def generate_seating_options():
+    return render_template('generate_seating_options.html')
+
+
+@app.route('/generate-seating/automatic', methods=['GET'])
+def automatic_allocation_page():
+    return redirect(url_for('classchoose'))
+
+
 # When student enters their rollnumber
     # their corresponding seating is displayed
 @app.route('/student', methods=['GET', 'POST'])
@@ -211,6 +436,43 @@ def student():
         return render_template('studentpage.html')
 
 
+@app.route('/student/pdf', methods=['GET'])
+def student_pdf():
+    roll = request.args.get('roll', '').strip()
+    if not roll:
+        flash('Roll number is required for PDF download.', 'error')
+        return redirect(url_for('student'))
+
+    student_data = stucollections.find_one({'rollnum': roll})
+    if not student_data:
+        try:
+            student_data = stucollections.find_one({'rollnum': int(roll)})
+        except (ValueError, TypeError):
+            student_data = None
+
+    if not student_data or not student_data.get('seatnum'):
+        flash('No seat assignment found for this roll number.', 'error')
+        return redirect(url_for('student'))
+
+    seat_rows = list(student_data.get('seatnum', []))
+    seat_rows.sort(key=lambda row: (str(row.get('date', '')), str(row.get('seatnum', ''))))
+
+    try:
+        pdf_bytes = build_student_seating_pdf(str(student_data.get('rollnum', roll)), seat_rows)
+    except RuntimeError as exc:
+        flash(str(exc), 'error')
+        return redirect(url_for('student'))
+
+    filename_roll = str(student_data.get('rollnum', roll)).replace(' ', '_')
+    return Response(
+        pdf_bytes,
+        mimetype='application/pdf',
+        headers={
+            'Content-Disposition': f'attachment; filename=student_seating_{filename_roll}.pdf'
+        },
+    )
+
+
 @app.route('/class', methods=['GET'])
 def classchoose():
     return render_template('classavailable.html')
@@ -220,6 +482,40 @@ def classchoose():
 @app.route('/uploaddata', methods=['GET'])
 def uploadpage():
     return render_template('studentdataupload.html')
+
+
+@app.route('/teachers', methods=['GET', 'POST'])
+def teachers_upload():
+    if request.method == 'GET':
+        return render_template('teacherupload.html')
+
+    file = request.files.get('file')
+    if not file or not file.filename:
+        flash('Please select a teacher dataset file.', 'error')
+        return render_template('teacherupload.html')
+
+    filename = secure_filename(file.filename)
+    file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    file.save(file_path)
+
+    teachers = load_teachers_from_excel(file_path)
+    teachercollections.delete_many({})
+    if teachers:
+        teachercollections.insert_many(teachers)
+
+    flash(f'Teacher dataset uploaded. {len(teachers)} unique teachers available for assignment.', 'success')
+    return render_template('teacherupload.html')
+
+
+@app.route('/viewteachers', methods=['GET'])
+def view_teachers():
+    teachers = list(
+        teachercollections.find(
+            {},
+            {"_id": 0, "teacher_id": 1, "name": 1, "department": 1, "availability": 1, "max_assignments_per_day": 1},
+        ).sort("teacher_id", 1)
+    )
+    return jsonify(teachers)
 
 # when the data is submitted from /uploaddata or studentdataupload.html the data is processed here
 # Here the data is checked and uploaded to the database
@@ -255,6 +551,14 @@ def upload_file():
         flash('Could not determine all years from filenames. Please include Second/Third/Fourth in names.', 'error')
         return render_template('studentdataupload.html')
 
+    # Phase 2 ingestion: replace prior student dataset with newly cleaned import.
+    stucollections.delete_many({})
+    global filled, seating_data, timetable_pdf_rows, teacher_assignments_data
+    filled = False
+    seating_data = {}
+    timetable_pdf_rows = []
+    teacher_assignments_data = {}
+
     file2 = year_files["SecondYear"]
     file3 = year_files["ThirdYear"]
     file4 = year_files["FourthYear"]
@@ -263,7 +567,6 @@ def upload_file():
         filename2 = secure_filename(file2.filename)
         file2.save(os.path.join(app.config['UPLOAD_FOLDER'], filename2))
         global data2
-        normalize_student_excel(os.path.join(app.config['UPLOAD_FOLDER'], filename2), "SecondYear")
         data2 = excel_to_json(os.path.join(
             app.config['UPLOAD_FOLDER'], filename2))
     else:
@@ -273,7 +576,6 @@ def upload_file():
         filename3 = secure_filename(file3.filename)
         file3.save(os.path.join(app.config['UPLOAD_FOLDER'], filename3))
         global data3
-        normalize_student_excel(os.path.join(app.config['UPLOAD_FOLDER'], filename3), "ThirdYear")
         data3 = excel_to_json(os.path.join(
             app.config['UPLOAD_FOLDER'], filename3))
     else:
@@ -283,59 +585,48 @@ def upload_file():
         filename4 = secure_filename(file4.filename)
         file4.save(os.path.join(app.config['UPLOAD_FOLDER'], filename4))
         global data4
-        normalize_student_excel(os.path.join(app.config['UPLOAD_FOLDER'], filename4), "FourthYear")
         data4 = excel_to_json(os.path.join(
             app.config['UPLOAD_FOLDER'], filename4))
     else:
         data4 = None
 
-    if data2 is not None:
-        for sheet_name, sheet_data in data2.items():
-            # Generate formatted roll numbers for each student
-            formatted_data = []
-            for idx, item in enumerate(sheet_data, start=1):
-                formatted_roll = generate_formatted_rollnum("SecondYear", sheet_name, idx)
-                formatted_data.append({
-                    **item, 
-                    "original_rollnum": item.get("rollnum"),  # Keep original if exists
-                    "rollnum": formatted_roll,  # Use formatted roll number
-                    "sheet_name": sheet_name, 
-                    "Year": "SecondYear", 
-                    "classroom": None
-                })
-            stucollections.insert_many(formatted_data)
+    validation_report = []
+    inserted_total = 0
+    skipped_existing_total = 0
+    dedup_in_file_total = 0
 
-    if data3 is not None:
-        for sheet_name, sheet_data in data3.items():
-            # Generate formatted roll numbers for each student
-            formatted_data = []
-            for idx, item in enumerate(sheet_data, start=1):
-                formatted_roll = generate_formatted_rollnum("ThirdYear", sheet_name, idx)
-                formatted_data.append({
-                    **item, 
-                    "original_rollnum": item.get("rollnum"),  # Keep original if exists
-                    "rollnum": formatted_roll,  # Use formatted roll number
-                    "sheet_name": sheet_name, 
-                    "Year": "ThirdYear", 
-                    "classroom": None
-                })
-            stucollections.insert_many(formatted_data)
+    second_report, second_inserted, second_skipped_existing, second_dedup = insert_students_with_validation(data2, "SecondYear")
+    third_report, third_inserted, third_skipped_existing, third_dedup = insert_students_with_validation(data3, "ThirdYear")
+    fourth_report, fourth_inserted, fourth_skipped_existing, fourth_dedup = insert_students_with_validation(data4, "FourthYear")
 
-    if data4 is not None:
-        for sheet_name, sheet_data in data4.items():
-            # Generate formatted roll numbers for each student
-            formatted_data = []
-            for idx, item in enumerate(sheet_data, start=1):
-                formatted_roll = generate_formatted_rollnum("FourthYear", sheet_name, idx)
-                formatted_data.append({
-                    **item, 
-                    "original_rollnum": item.get("rollnum"),  # Keep original if exists
-                    "rollnum": formatted_roll,  # Use formatted roll number
-                    "sheet_name": sheet_name, 
-                    "Year": "FourthYear", 
-                    "classroom": None
-                })
-            stucollections.insert_many(formatted_data)
+    validation_report.extend(second_report)
+    validation_report.extend(third_report)
+    validation_report.extend(fourth_report)
+
+    inserted_total = second_inserted + third_inserted + fourth_inserted
+    skipped_existing_total = second_skipped_existing + third_skipped_existing + fourth_skipped_existing
+    dedup_in_file_total = second_dedup + third_dedup + fourth_dedup
+
+    # Clean up any existing duplicates already present in DB from previous uploads.
+    integrity_summary = run_data_integrity_check(remove_duplicates=True)
+    duplicate_rows_detected = integrity_summary.get("duplicate_rows_detected", 0)
+
+    print("\n=== Dataset Validation Report ===")
+    print("Department | Expected | Actual | Duplicates Removed")
+    for row in sorted(validation_report, key=lambda item: item["department"]):
+        print(
+            f"{row['department']} | {row['expected']} | {row['actual']} | {row['duplicates_removed']}"
+        )
+    print("=================================")
+
+    if dedup_in_file_total > 0 or skipped_existing_total > 0 or duplicate_rows_detected > 0:
+        flash(
+            f"Upload validated: inserted={inserted_total}, in-file duplicates removed={dedup_in_file_total}, "
+            f"already-existing duplicates skipped={skipped_existing_total}, DB duplicates cleaned={duplicate_rows_detected}.",
+            'warning',
+        )
+    else:
+        flash(f"Upload validated: inserted={inserted_total}. No duplicates detected.", 'success')
 
     global listy
     listy = []
@@ -663,48 +954,17 @@ def details():
         # List to store the details of selected classes
         class_data = []
 
-        # Dictionary mapping class items to their details
-        # Standardized: 4 columns × 6 rows = 24 seats per classroom
-        class_details = {
-            'ADM 303': {'class_name': 'ADM 303', 'column': 4, 'rows': 6},
-            'ADM 304': {'class_name': 'ADM 304', 'column': 4, 'rows': 6},
-            'ADM 305': {'class_name': 'ADM 305', 'column': 4, 'rows': 6},
-            'ADM 306': {'class_name': 'ADM 306', 'column': 4, 'rows': 6},
-            'ADM 307': {'class_name': 'ADM 307', 'column': 4, 'rows': 6},
-            'ADM 308': {'class_name': 'ADM 308', 'column': 4, 'rows': 6},
-            'ADM 309': {'class_name': 'ADM 309', 'column': 4, 'rows': 6},
-            'ADM 310': {'class_name': 'ADM 310', 'column': 4, 'rows': 6},
-            'ADM 311': {'class_name': 'ADM 311', 'column': 4, 'rows': 6},
-            'EAB 206': {'class_name': 'EAB 206', 'column': 4, 'rows': 6},
-            'EAB 306': {'class_name': 'EAB 306', 'column': 4, 'rows': 6},
-            'EAB 401': {'class_name': 'EAB 401', 'column': 4, 'rows': 6},
-            'EAB 304': {'class_name': 'EAB 304', 'column': 4, 'rows': 6},
-            'EAB 303': {'class_name': 'EAB 303', 'column': 4, 'rows': 6},
-            'EAB 104': {'class_name': 'EAB 104', 'column': 4, 'rows': 6},
-            'EAB 103': {'class_name': 'EAB 103', 'column': 4, 'rows': 6},
-            'EAB 203': {'class_name': 'EAB 203', 'column': 4, 'rows': 6},
-            'EAB 204': {'class_name': 'EAB 204', 'column': 4, 'rows': 6},
-            'WAB 206': {'class_name': 'WAB 206', 'column': 4, 'rows': 6},
-            'WAB 105': {'class_name': 'WAB 105', 'column': 4, 'rows': 6},
-            'WAB 107': {'class_name': 'WAB 107', 'column': 4, 'rows': 6},
-            'WAB 207': {'class_name': 'WAB 207', 'column': 4, 'rows': 6},
-            'WAB 212': {'class_name': 'WAB 212', 'column': 4, 'rows': 6},
-            'WAB 210': {'class_name': 'WAB 210', 'column': 4, 'rows': 6},
-            'WAB 211': {'class_name': 'WAB 211', 'column': 4, 'rows': 6},
-            'WAB 205': {'class_name': 'WAB 205', 'column': 4, 'rows': 6},
-            'WAB 305': {'class_name': 'WAB 305', 'column': 4, 'rows': 6},
-            'WAB 303': {'class_name': 'WAB 303', 'column': 4, 'rows': 6},
-            'WAB 403': {'class_name': 'WAB 403', 'column': 4, 'rows': 6},
-            'WAB 405': {'class_name': 'WAB 405', 'column': 4, 'rows': 6},
-            'EAB 415': {'class_name': 'EAB 415', 'column': 4, 'rows': 6},
-            'EAB 416': {'class_name': 'EAB 416', 'column': 4, 'rows': 6},
-            'WAB 412': {'class_name': 'WAB 412', 'column': 4, 'rows': 6},
-            'EAB 310': {'class_name': 'EAB 310', 'column': 4, 'rows': 6},
-        }
-
         for item in items:
-            if item in class_details:
-                class_data.append(class_details[item])
+            if item in CLASSROOM_CATALOG:
+                room_payload = dict(CLASSROOM_CATALOG[item])
+                configured_capacity = request.form.get(f'capacity::{item}', room_payload.get('capacity', 60))
+                room_payload['capacity'] = normalize_capacity(configured_capacity, default_capacity=60)
+                room_payload['rows'] = room_payload['capacity'] // 2
+                class_data.append(room_payload)
+
+        if not class_data:
+            flash('Select at least one classroom.', 'error')
+            return redirect(url_for('classchoose'))
         # Write the class_data list to 'static/stuarrange.txt' file as JSON (compact format)
         with open('static/stuarrange.txt', 'w') as f:
             json.dump(class_data, f)
@@ -742,238 +1002,163 @@ def seating():
             flash('Please upload timetable first before generating seating!', 'error')
             return redirect(url_for('admin'))
 
-        # Always reload dates to reflect latest timetable upload
+        # Data integrity check before seating generation.
+        integrity_summary = run_data_integrity_check(remove_duplicates=True)
+        duplicate_rows_detected = integrity_summary.get("duplicate_rows_detected", 0)
+        if duplicate_rows_detected > 0:
+            flash(
+                f"Data integrity warning: removed {duplicate_rows_detected} duplicate student records by roll number before seating.",
+                'warning',
+            )
+
+        print("\n=== Pre-Seating Integrity Report ===")
+        print("Department | Expected | Actual | Duplicates Removed")
+        for row in integrity_summary.get("report", []):
+            print(
+                f"{row['department']} | {row['expected']} | {row['actual']} | {row['duplicates_removed']}"
+            )
+        print("===================================")
+
         with open('static/dates.txt', 'r') as datefiles:
             dates = json.load(datefiles)
-        
-        #reset data to avoid redundancy
+        with open('static/stuarrange.txt', 'r') as stufiles:
+            selected_classrooms = json.load(stufiles)
+
+        if not selected_classrooms:
+            flash('Choose at least one classroom before generating seating.', 'error')
+            return redirect(url_for('classchoose'))
+
         stucollections.update_many({}, {"$unset": {"seatnum": ""}})
-        
-        for date in dates:
-            # Build subject groups for this date directly from students
-            subject_groups = {}
-            students_with_exams = stucollections.find(
-                {"subject": {"$elemMatch": {"date": date}}},
-                {"rollnum": 1, "subject": 1}
+
+        global seating_data, teacher_assignments_data, timetable_pdf_rows
+        seating_data = {}
+        teacher_assignments_data = {}
+        timetable_pdf_rows = []
+        total_unseated = 0
+        total_conflicts = 0
+        total_validation_issues = 0
+        teacher_warnings_total = 0
+        auto_added_rooms_total = 0
+        capacity_deficit_total = 0
+
+        teachers = list(
+            teachercollections.find(
+                {},
+                {"_id": 0, "teacher_id": 1, "name": 1, "department": 1, "availability": 1, "max_assignments_per_day": 1},
             )
-            for student in students_with_exams:
-                rollnum = student.get("rollnum")
-                for subj in student.get("subject", []):
-                    if subj.get("date") == date:
-                        key = subj.get("subject", "Unknown")
-                        if key not in subject_groups:
-                            subject_groups[key] = {"_id": subj, "ro": []}
-                        subject_groups[key]["ro"].append(rollnum)
+        )
+        global_teacher_load = {}
 
-            listy = list(subject_groups.values())
+        for date in dates:
+            students_for_date = list(
+                stucollections.find(
+                    {"subject": {"$elemMatch": {"date": date}}},
+                    {"rollnum": 1, "sheet_name": 1, "Year": 1, "subject": 1},
+                ).sort([
+                    ("roll_batch", 1),
+                    ("roll_dept", 1),
+                    ("roll_serial", 1),
+                    ("rollnum", 1),
+                ])
+            )
+            candidates = build_candidates_for_date(students_for_date, date)
 
-            with open('static/stuarrange.txt', 'r') as stufiles:
-                stulist = json.load(stufiles)
-            
-            # Extract year and department from roll numbers
-            def normalize_dept(dept):
-                """Convert 2-char departments to 3-char"""
-                dept_mapping = {
-                    "EE": "MEE",    # Electrical/Mechanical Engineering
-                    "EC": "ECE",    # Electronics & Communication Engineering
-                    "CE": "CIV",    # Civil Engineering
-                    "ME": "MEC",    # Mechanical Engineering
-                    "RB": "RBE",    # Robotics & Automation
-                    "AD": "ADE",    # Additional
-                    "MR": "MRS",    # Miscellaneous
-                }
-                return dept_mapping.get(dept, dept)  # Return mapped or original if not found
-            
-            def extract_year_dept(rollnum):
-                """Extract year and department from roll number
-                Format: YYDEPT### where dept can be 2-3 letters (EE, ME, MEE, RB, MCA, etc)
-                """
-                if len(rollnum) < 4:
-                    return None, None
-                
-                year = rollnum[:2]  # First 2 digits (22, 23, 24)
-                
-                # Extract department (2-3 letters, stop at first digit)
-                dept = ""
-                for char in rollnum[2:]:
-                    if char.isalpha():
-                        dept += char
-                    else:
-                        break
-                
-                # Normalize 2-char departments to 3-char
-                dept = normalize_dept(dept)
-                
-                return year, dept if dept else None
-            
-            # Build year -> department -> exam -> unique rollnums for this date
-            year_dept_exam_map = {}
-            seen_rollnums = set()
-            for subject_item in listy:
-                if subject_item["ro"] and len(subject_item["ro"]) > 0:
-                    exam_name = subject_item.get("_id", {}).get("subject", "Unknown")
-                    for rollnum in subject_item.get("ro", []):
-                        if rollnum in seen_rollnums:
-                            continue
-                        seen_rollnums.add(rollnum)
-                        year, dept = extract_year_dept(rollnum)
-                        if not year or not dept:
-                            continue
-                        if year not in year_dept_exam_map:
-                            year_dept_exam_map[year] = {}
-                        if dept not in year_dept_exam_map[year]:
-                            year_dept_exam_map[year][dept] = {}
-                        if exam_name not in year_dept_exam_map[year][dept]:
-                            year_dept_exam_map[year][dept][exam_name] = []
-                        year_dept_exam_map[year][dept][exam_name].append(rollnum)
+            effective_classrooms, auto_added_rooms, capacity_deficit = expand_classrooms_for_capacity(
+                selected_classrooms,
+                len(candidates),
+            )
+            auto_added_rooms_total += len(auto_added_rooms)
+            capacity_deficit_total += capacity_deficit
 
-            # Sort roll numbers for stable ordering
-            for year in year_dept_exam_map:
-                for dept, exam_map in year_dept_exam_map[year].items():
-                    for exam_name, rollnums in exam_map.items():
-                        rollnums.sort()
+            layouts, seat_updates, stats = allocate_classrooms(candidates, effective_classrooms)
+            validation_issues = validate_layout(layouts)
 
-            # Order years in descending order (24, 23, 22, etc.) for consistent placement
-            year_order = sorted(year_dept_exam_map.keys(), reverse=True)
-            
-            # Debug: Print department distribution
-            print("\n=== Department Distribution ===")
-            for year in year_order:
-                for dept in sorted(year_dept_exam_map[year].keys()):
-                    total_students = sum(len(rollnums) for rollnums in year_dept_exam_map[year][dept].values())
-                    print(f"Year {year}, Dept {dept}: {total_students} students")
-            print("================================\n")
+            teacher_assignments, teacher_warnings, global_teacher_load = assign_teachers_for_date(
+                date,
+                layouts,
+                teachers,
+                global_teacher_load=global_teacher_load,
+            )
+            teacher_assignments_data[date] = teacher_assignments
+            teacher_warnings_total += len(teacher_warnings)
 
-            # Build queues per year and department (optimized)
-            from collections import deque
-            year_dept_queues = {}
-            for year in year_order:
-                year_dept_queues[year] = {}
-                dept_order = sorted(year_dept_exam_map[year].keys())
-                for dept in dept_order:
-                    exam_map = year_dept_exam_map[year][dept]
-                    exam_names = sorted(exam_map.keys())
-                    
-                    # Convert to deques for O(1) popleft
-                    exam_deques = {exam: deque(rollnums) for exam, rollnums in exam_map.items()}
-                    
-                    # Round-robin through exams efficiently
-                    queue = []
-                    while exam_deques:
-                        for exam in list(exam_deques.keys()):
-                            if exam_deques[exam]:
-                                queue.append((exam_deques[exam].popleft(), exam))
-                                if not exam_deques[exam]:
-                                    del exam_deques[exam]
-                    
-                    year_dept_queues[year][dept] = queue
-            
-            # Batch seat assignments for performance
-            seat_assignments = []
+            for layout in layouts:
+                room_name = layout.get("class_name")
+                layout["teacher"] = teacher_assignments.get(
+                    room_name,
+                    {
+                        "teacher_id": "UNASSIGNED",
+                        "name": "Unassigned",
+                        "department": "N/A",
+                    },
+                )
 
-            # Build student list with round-robin across departments
-            all_students = []
-            
-            for year in year_order:
-                dept_order = sorted(year_dept_queues[year].keys())
-                
-                # Convert to deques for efficient popping
-                dept_deques = {dept: deque(year_dept_queues[year][dept]) for dept in dept_order}
-                
-                # Round-robin through departments to distribute students evenly
-                while dept_deques:
-                    for dept in dept_order:  # Keep original order for consistency
-                        if dept in dept_deques and dept_deques[dept]:
-                            rollnum, exam_name = dept_deques[dept].popleft()
-                            all_students.append((rollnum, exam_name, dept, year))
-                            if not dept_deques[dept]:
-                                del dept_deques[dept]
-            
-            student_idx = 0  # Track position in the ordered student list
+            timetable_pdf_rows.extend(_classroom_summary_rows(date, layouts))
 
-            for i in stulist:
-                i["a"] = []
-                i["b"] = []
-                i["c"] = []
-                i["d"] = []
-                i["e"] = []
-                i["f"] = []
-                i["g"] = []
-                i["h"] = []
-                class_name = i.get("class_name")
-
-                rows = int(i["rows"])
-                column_order = ["a", "b", "c", "d", "e", "f", "g", "h"]  # 8 columns
-
-                # Fill ROW BY ROW (not column by column) to ensure different depts in each row
-                for row_num in range(1, rows + 1):
-                    for col_key in column_order:
-                        if student_idx >= len(all_students):
-                            break
-                        
-                        rollnum, exam_name, dept, year = all_students[student_idx]
-                        
-                        student_data = {
-                            "rollnum": rollnum,
-                            "dept": dept,
-                            "exam": exam_name
-                        }
-                        i[col_key].append(student_data)
-
-                        seatinfo = {
-                            "date": date,
-                            "seatnum": f"{col_key}{row_num}",
-                            "classroom": class_name,
-                            "subject": exam_name
-                        }
-                        seat_assignments.append({"rollnum": rollnum, "seatinfo": seatinfo})
-                        
-                        student_idx += 1
-            
-            # Batch database updates using bulk_write for performance
-            from pymongo import UpdateOne
-            student_seat_map = {}
-            for assignment in seat_assignments:
-                rollnum = assignment["rollnum"]
-                if rollnum not in student_seat_map:
-                    student_seat_map[rollnum] = []
-                student_seat_map[rollnum].append(assignment["seatinfo"])
-            
-            # Use bulk_write for efficient database updates
-            if student_seat_map:
-                bulk_operations = [
-                    UpdateOne(
-                        {"rollnum": rollnum},
-                        {"$addToSet": {"seatnum": {"$each": seats}}}
+            if seat_updates:
+                bulk_operations = []
+                for rollnum, seats in seat_updates.items():
+                    seats_with_date = []
+                    for seat in seats:
+                        seatinfo = dict(seat)
+                        seatinfo["date"] = date
+                        seats_with_date.append(seatinfo)
+                    bulk_operations.append(
+                        UpdateOne(
+                            {"rollnum": rollnum},
+                            {"$addToSet": {"seatnum": {"$each": seats_with_date}}},
+                        )
                     )
-                    for rollnum, seats in student_seat_map.items()
-                ]
-                stucollections.bulk_write(bulk_operations, ordered=False)
-            
-            # Store seating data for immediate display
-            global seating_data
-            seating_data = {date: stulist}
-            
-            newlist = list(stulist)
-            
-            # Check if all students were seated
-            # Count students from all_students queue that were not placed
-            unseated_total = len(all_students) - student_idx
-            
-            if unseated_total > 0:
-                # There are more students than available seats
-                flash(f'Warning: {unseated_total} students could not be seated. Available capacity is insufficient.', 'danger')
-                return render_template('classavailable.html', stunum=unseated_total)
-            
-            # Seating file output disabled (per request)
-            filled = True  # Set 'filled' to True to indicate that seating is generated
+                if bulk_operations:
+                    stucollections.bulk_write(bulk_operations, ordered=False)
 
+            seating_data[date] = layouts
+            total_unseated += stats.unseated_students
+            total_conflicts += stats.conflict_attempts_without_fit
+            total_validation_issues += len(validation_issues)
 
-        flash('Generated', 'success')
-        # Display seating immediately after generation with in-memory data
+            print(
+                f"[{date}] total={stats.total_students}, seated={stats.seated_students}, "
+                f"unseated={stats.unseated_students}, two_per_bench={stats.benches_with_two_students}, "
+                f"single_per_bench={stats.benches_with_single_student}, validation_issues={len(validation_issues)}, "
+                f"auto_added_rooms={len(auto_added_rooms)}, capacity_deficit={capacity_deficit}"
+            )
+
+        filled = True
+
+        total_capacity = sum(int(room.get('capacity', CLASSROOM_CAPACITY) or CLASSROOM_CAPACITY) for room in selected_classrooms)
+        if total_unseated > 0:
+            flash(
+                f'Generated with warnings: {total_unseated} students unseated across dates. '
+                f'Configured capacity per date is {total_capacity}.',
+                'danger',
+            )
+        elif capacity_deficit_total > 0:
+            flash(
+                f'Generated with warnings: classroom deficit detected ({capacity_deficit_total} extra room slots still needed).',
+                'danger',
+            )
+        elif total_validation_issues > 0:
+            flash(
+                f'Generated with warnings: {total_validation_issues} bench pairing validation issues detected.',
+                'warning',
+            )
+        elif total_conflicts > 0 or teacher_warnings_total > 0:
+            flash(
+                f'Generated with warnings: half-filled benches={total_conflicts}, teacher assignment warnings={teacher_warnings_total}.',
+                'warning',
+            )
+        elif auto_added_rooms_total > 0:
+            flash(
+                f'Generated successfully with automatic classroom expansion ({auto_added_rooms_total} room additions across dates).',
+                'success',
+            )
+        else:
+            flash('Generated', 'success')
+
         if seating_data:
-            first_date = dates[0]
-            class_list = seating_data.get(first_date, [])
+            first_date = dates[0] if dates else None
+            class_list = seating_data.get(first_date, []) if first_date else []
             return render_template('viewseating.html', dates=dates, date_exams={}, initial_data=class_list)
         return render_template("adminhome.html")
 
@@ -1013,9 +1198,57 @@ def viewseating():
 # Markup is used to mark the content as safe to render HTML tags, assuming the content contains HTML
 
 
+@app.route('/export/timetable.pdf', methods=['GET'])
+def export_timetable_pdf():
+    global timetable_pdf_rows
+    if not timetable_pdf_rows:
+        flash('Generate seating first to export timetable PDF.', 'error')
+        return redirect(url_for('admin'))
+
+    try:
+        pdf_bytes = build_timetable_pdf(timetable_pdf_rows)
+    except RuntimeError as exc:
+        flash(str(exc), 'error')
+        return redirect(url_for('admin'))
+
+    return Response(
+        pdf_bytes,
+        mimetype='application/pdf',
+        headers={
+            'Content-Disposition': 'attachment; filename=exam_timetable.pdf'
+        },
+    )
+
+
+@app.route('/roster', methods=['GET'])
+def view_roster():
+    rows = _build_roster_rows()
+    if not rows:
+        flash('Generate seating first to view invigilator roster.', 'error')
+        return redirect(url_for('admin'))
+    return render_template('roster.html', rows=rows)
+
+
+@app.route('/roster/export.csv', methods=['GET'])
+def export_roster_csv():
+    rows = _build_roster_rows()
+    if not rows:
+        flash('Generate seating first to export invigilator roster.', 'error')
+        return redirect(url_for('admin'))
+
+    csv_bytes = to_csv_bytes(rows)
+    return Response(
+        csv_bytes,
+        mimetype='text/csv',
+        headers={
+            'Content-Disposition': 'attachment; filename=invigilator_roster.csv'
+        },
+    )
+
+
 @app.route('/viewseating/<path:name>', methods=['GET'])
 def viewseating1(name):
-    global filled, seating_data
+    global filled, seating_data, teacher_assignments_data
     if filled:
         # First try to use in-memory seating data from recent generation
         if name in seating_data:
@@ -1059,43 +1292,53 @@ def viewseating1(name):
                 if seatinfo.get("date") != name:
                     continue
                 classroom = seatinfo.get("classroom")
-                seatnum = str(seatinfo.get("seatnum", "")).lower()
+                seatnum = str(seatinfo.get("seatnum", "")).strip().upper()
                 subject = seatinfo.get("subject", "Unknown")
-                if not classroom or not seatnum or len(seatnum) < 2:
+                if not classroom or not seatnum:
                     continue
 
-                col_key = seatnum[0]
-                if col_key not in ("a", "b", "c", "d", "e", "f", "g", "h"):
+                if '-' not in seatnum or not seatnum.startswith('B'):
                     continue
+                bench_token, side_token = seatnum.split('-', 1)
                 try:
-                    seat_index = int(seatnum[1:]) - 1
+                    bench_no = int(bench_token[1:])
                 except ValueError:
+                    continue
+                if bench_no < 1 or bench_no > BENCHES_PER_CLASSROOM:
+                    continue
+                if side_token not in ("L", "R"):
                     continue
 
                 if classroom not in class_map:
+                    teacher_payload = teacher_assignments_data.get(name, {}).get(
+                        classroom,
+                        {
+                            "teacher_id": "UNASSIGNED",
+                            "name": "Unassigned",
+                            "department": "N/A",
+                        },
+                    )
                     class_map[classroom] = {
                         "class_name": classroom,
-                        "column": 8,
-                        "rows": 6,
-                        "a": [],
-                        "b": [],
-                        "c": [],
-                        "d": [],
-                        "e": [],
-                        "f": [],
-                        "g": [],
-                        "h": []
+                        "teacher": teacher_payload,
+                        "bench_count": BENCHES_PER_CLASSROOM,
+                        "capacity": CLASSROOM_CAPACITY,
+                        "benches": [
+                            {"bench": i, "left": None, "right": None}
+                            for i in range(1, BENCHES_PER_CLASSROOM + 1)
+                        ]
                     }
 
-                col_list = class_map[classroom][col_key]
-                while len(col_list) <= seat_index:
-                    col_list.append(None)
-
-                col_list[seat_index] = {
+                seat_payload = {
                     "rollnum": rollnum,
                     "dept": dept,
                     "exam": subject
                 }
+                bench = class_map[classroom]["benches"][bench_no - 1]
+                if side_token == "L":
+                    bench["left"] = seat_payload
+                else:
+                    bench["right"] = seat_payload
 
         class_list = sorted(class_map.values(), key=lambda c: c["class_name"])
         return json.dumps(class_list)

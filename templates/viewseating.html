@@ -1,204 +1,98 @@
-<!DOCTYPE html>
-<html>
-  <head>
-    <title>View Seating Arrangements</title>
-    <!-- Bootstrap CSS -->
-    <link
-      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
-      rel="stylesheet"
-      integrity="sha384-9ndCyUaIbzAi2FUVXJi0CjmCapSmO7SnpJef0486qhLnuZ2cdeRhO02iuK6FUUVM"
-      crossorigin="anonymous"
-    />
-    <style>
-      body {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        min-height: 100vh;
-      }
-      .header-card {
-        background: white;
-        border-radius: 15px;
-        box-shadow: 0 5px 20px rgba(0,0,0,0.1);
-        padding: 1.5rem;
-        margin-bottom: 2rem;
-        position: sticky;
-        top: 0;
-        z-index: 1000;
-      }
-      .content-card {
-        background: white;
-        border-radius: 20px;
-        box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-        padding: 2.5rem;
-      }
-      .date-btn {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        border: none;
-        padding: 15px 25px;
-        font-weight: 600;
-        color: white;
-        border-radius: 10px;
-        transition: all 0.3s ease;
-      }
-      .date-btn:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
-        color: white;
-      }
-      .table {
-        background: white;
-        border-radius: 10px;
-        overflow: hidden;
-        box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-        margin-bottom: 2rem;
-      }
-      .table thead {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-      }
-      .table th {
-        font-weight: 600;
-        padding: 1rem;
-      }
-      .table td {
-        padding: 0.75rem;
-        font-size: 0.9rem;
-      }
-      .dept-badge {
-        display: inline-block;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 0.3rem 0.6rem;
-        border-radius: 5px;
-        font-size: 0.8rem;
-        font-weight: 600;
-        margin-right: 0.5rem;
-      }
-      .exam-text {
-        font-size: 0.85rem;
-        color: #555;
-        font-style: italic;
-      }
-      h5 {
-        color: #667eea;
-        font-weight: 700;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="container py-4">
-      <div class="header-card">
-        <div class="d-flex justify-content-between align-items-center">
-          <h4 class="mb-0">📊 View Seating Arrangements</h4>
-          <a href="/admin" class="btn btn-outline-secondary btn-sm">🏠 Admin Home</a>
-        </div>
-      </div>
-      
-      <div class="content-card">
-        <h5 class="mb-4">📅 Select Exam Date:</h5>
-        <div id="buttons" class="mb-4"></div>
-        <div id="tables"></div>
-      </div>
-    </div>
-    <script>
-      var dates = {{ dates | tojson }};
-      var dateExams = {{ date_exams | tojson }};
-      var buttonsContainer = document.getElementById('buttons');
-      var tablesContainer = document.getElementById('tables');
-      var initialData = {{ initial_data | tojson if initial_data else 'null' }};
-      
-      // Create buttons for each date with exam subjects
-      for (var i = 0; i < dates.length; i++) {
-        var dateValue = dates[i];
-        var exams = dateExams[dateValue] || [];
-        
-        var buttonWrapper = document.createElement('div');
-        buttonWrapper.className = 'd-inline-block me-2 mb-3';
-        
-        var button = document.createElement('button');
-        button.className = 'date-btn me-3 mb-3';
-        button.style.minWidth = '200px';
-        
-        // Button content with date and exams
-        var buttonText = '📅 ' + dateValue;
-        if (exams.length > 0) {
-          buttonText += '<br><small style="opacity: 0.9;">📚 ' + exams.join(', ') + '</small>';
-        }
-        button.innerHTML = buttonText;
-        
-        button.setAttribute('data-date', dateValue);
-        button.addEventListener('click', function() {
-          table(this.getAttribute('data-date'));
-        });
-        
-        buttonWrapper.appendChild(button);
-        buttonsContainer.appendChild(buttonWrapper);
-      }
-      
-      // Display initial data if provided (immediately after generation)
-      if (initialData && initialData.length > 0) {
-        displayTable(initialData);
-      }
-      
-      function displayTable(json) {
-        var out = '';
-        for (var i = 0; i < json.length; i++) {
-          var classData = json[i];
-          if (classData.a || classData.b || classData.c || classData.d || classData.e || classData.f || classData.g || classData.h) {
-            var aCol = classData.a || [];
-            var bCol = classData.b || [];
-            var cCol = classData.c || [];
-            var dCol = classData.d || [];
-            var eCol = classData.e || [];
-            var fCol = classData.f || [];
-            var gCol = classData.g || [];
-            var hCol = classData.h || [];
-            var maxSeats = Math.max(aCol.length, bCol.length, cCol.length, dCol.length, eCol.length, fCol.length, gCol.length, hCol.length);
-            var maxRows = classData.rows ? classData.rows : maxSeats;
-            out += '<table class="table table-hover">';
-            out += '<thead><tr><th colspan="8" class="text-center fs-5">🏛️ ' + classData.class_name + '</th></tr>';
-            out += '<tr><th class="text-center">Column A</th><th class="text-center">Column B</th><th class="text-center">Column C</th><th class="text-center">Column D</th><th class="text-center">Column E</th><th class="text-center">Column F</th><th class="text-center">Column G</th><th class="text-center">Column H</th></tr>';
-            out += '<tr><th>A1</th><th>B1</th><th>C1</th><th>D1</th><th>E1</th><th>F1</th><th>G1</th><th>H1</th></tr></thead>';
-            out += '<tbody>';
-            for (var z = 0; z < maxRows; z++) {
-              function seatContent(col, idx, label) {
-                var data = col && idx < col.length ? col[idx] : null;
-                if (!data) {
-                  return '<strong>' + label + '</strong><br>-';
-                }
-                var roll = typeof data === 'string' ? data : data.rollnum || data;
-                var dept = data.dept ? data.dept : '';
-                var exam = data.exam ? data.exam : '';
-                return '<strong>' + label + '</strong><br>' + roll + '<br><span class="dept-badge">' + dept + '</span><span class="exam-text">' + exam + '</span>';
-              }
+{% extends 'base_admin.html' %}
+{% set active_page = 'reports' %}
+{% block title %}Seating Preview{% endblock %}
+{% block page_title %}Seating Preview{% endblock %}
+{% block page_subtitle %}<p class="page-subtitle">Inspect classroom-wise bench allocations by exam date.</p>{% endblock %}
 
-              out += '<tr>';
-              out += '<td>' + seatContent(aCol, z, 'A' + (z + 1)) + '</td>';
-              out += '<td>' + seatContent(bCol, z, 'B' + (z + 1)) + '</td>';
-              out += '<td>' + seatContent(cCol, z, 'C' + (z + 1)) + '</td>';
-              out += '<td>' + seatContent(dCol, z, 'D' + (z + 1)) + '</td>';
-              out += '<td>' + seatContent(eCol, z, 'E' + (z + 1)) + '</td>';
-              out += '<td>' + seatContent(fCol, z, 'F' + (z + 1)) + '</td>';
-              out += '<td>' + seatContent(gCol, z, 'G' + (z + 1)) + '</td>';
-              out += '<td>' + seatContent(hCol, z, 'H' + (z + 1)) + '</td>';
-              out += '</tr>';
+{% block content %}
+<div class="surface mb-3">
+  <div class="surface-body">
+    <div class="section-title">Select Exam Date</div>
+    <div id="buttons" class="d-flex flex-wrap gap-2"></div>
+  </div>
+</div>
+
+<div class="surface">
+  <div class="surface-body" id="tables"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  var dates = {{ dates | tojson }};
+  var dateExams = {{ date_exams | tojson }};
+  var buttonsContainer = document.getElementById('buttons');
+  var tablesContainer = document.getElementById('tables');
+  var initialData = {{ initial_data | tojson if initial_data else 'null' }};
+
+  for (var i = 0; i < dates.length; i++) {
+    var dateValue = dates[i];
+    var exams = dateExams[dateValue] || [];
+
+    var button = document.createElement('button');
+    button.className = 'btn btn-outline-primary';
+    var text = dateValue;
+    if (exams.length > 0) {
+      text += ' | ' + exams.join(', ');
+    }
+    button.textContent = text;
+    button.setAttribute('data-date', dateValue);
+    button.addEventListener('click', function() {
+      table(this.getAttribute('data-date'));
+    });
+    buttonsContainer.appendChild(button);
+  }
+
+  if (initialData && initialData.length > 0) {
+    displayTable(initialData);
+  }
+
+  function displayTable(json) {
+    var out = '';
+    for (var i = 0; i < json.length; i++) {
+      var classData = json[i];
+      if (classData.benches && classData.benches.length > 0) {
+        var benches = classData.benches;
+        var teacher = classData.teacher || { teacher_id: 'UNASSIGNED', name: 'Unassigned' };
+        out += '<div class="table-shell mb-3"><div class="table-responsive">';
+        out += '<table class="table table-hover">';
+        out += '<thead><tr><th colspan="3">' + classData.class_name + '</th></tr>';
+        out += '<tr><th colspan="3">Teacher: ' + teacher.teacher_id + ' - ' + teacher.name + '</th></tr>';
+        out += '<tr><th style="width: 120px;">Bench</th><th>Left Seat</th><th>Right Seat</th></tr></thead>';
+        out += '<tbody>';
+        for (var z = 0; z < benches.length; z++) {
+          function seatContent(data, label) {
+            if (!data) {
+              return '<strong>' + label + '</strong><br>-';
             }
-            out += '</tbody></table>';
+            var roll = typeof data === 'string' ? data : data.rollnum || data;
+            var dept = data.dept ? 'Dept: ' + data.dept + '<br>' : '';
+            var exam = data.exam ? data.exam : '';
+            return '<strong>' + label + '</strong><br>' + roll + '<br>' + dept + '<span class="text-muted">' + exam + '</span>';
           }
+
+          out += '<tr>';
+          out += '<td><strong>B' + benches[z].bench + '</strong></td>';
+          out += '<td>' + seatContent(benches[z].left, 'B' + benches[z].bench + '-L') + '</td>';
+          out += '<td>' + seatContent(benches[z].right, 'B' + benches[z].bench + '-R') + '</td>';
+          out += '</tr>';
         }
-        tablesContainer.innerHTML = out;
+        out += '</tbody></table></div></div>';
       }
-      
-      function table(name) {
-        var xhr = new XMLHttpRequest();
-        xhr.open('GET', 'viewseating/' + name, true);
-        xhr.onload = function() {
-          if (xhr.status == 200) {
-            var json = JSON.parse(xhr.responseText);
-            displayTable(json);
-          }
-        };
-        xhr.send();
+    }
+    tablesContainer.innerHTML = out || '<div class="text-muted">No seating records available for the selected date.</div>';
+  }
+
+  function table(name) {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', 'viewseating/' + name, true);
+    xhr.onload = function() {
+      if (xhr.status == 200) {
+        var json = JSON.parse(xhr.responseText);
+        displayTable(json);
       }
-    </script>
-  </body>
-</html>
+    };
+    xhr.send();
+  }
+</script>
+{% endblock %}
