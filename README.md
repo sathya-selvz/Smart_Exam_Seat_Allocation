@@ -57,11 +57,14 @@ Student ingestion now overwrites old student records with a cleaned primary data
 
 ## Screenshots
    
-### Admin Page
-![Admin Page](./Screenshots/admin1.png)
+### Admin Dashboard
+![Admin Dashboard](./Screenshots/Admin_dashboard.png)
 
-### Student Details
-![Student Details](./Screenshots/studetails.png)
+### Student Page
+![Student Page](./Screenshots/Student_page.png)
+
+### Seatinng Preview
+![Seatinng Preview](./Screenshots/seating_preview.png)
 
 More screenshots in screenshots folder
 
